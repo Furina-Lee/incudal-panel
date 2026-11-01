@@ -9,7 +9,7 @@ on:
       tag:
         description: 'Image tag (e.g., latest, v1.0.0)'
         required: false
-        default: 'latest'
+        default: 'stable'
 
 env:
   REGISTRY: ghcr.io

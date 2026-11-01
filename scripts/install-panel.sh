@@ -14,13 +14,13 @@
 #   升级：  sudo bash install-panel.sh --upgrade
 #   卸载：  sudo bash install-panel.sh --uninstall
 #
-# 项目地址: https://github.com/ashvvvvv/incudal-
+# 项目地址: https://github.com/Furina-Lee/incudal-panel
 # ============================================================================
 set -euo pipefail
 
 # ========================== 全局常量 ==========================
 readonly SCRIPT_VERSION="3.0.0"
-readonly GITHUB_REPO="ashvvvvv/incudal-"
+readonly GITHUB_REPO="Furina-Lee/incudal-panel"
 readonly INSTALL_DIR="/opt/incudal"
 readonly SERVICE_NAME="incudal"
 readonly SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"

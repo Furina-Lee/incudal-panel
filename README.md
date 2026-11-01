@@ -39,7 +39,7 @@ scripts/                本地开发和检查脚本
 
 ## 搭建教程
 
-本文档中的仓库地址以 `ashvvvvv/incudal-` 为例；如果你使用自己的 Fork，请同步替换 GitHub 地址和 GHCR 镜像名。
+本文档使用你的 GitHub 仓库 `Furina-Lee/incudal-panel` 作为示例；如果部署自己的 Fork，请同步替换 GitHub 地址、Agent Release 仓库和 GHCR 镜像名。
 
 本项目使用 PostgreSQL 作为数据库。
 
@@ -50,8 +50,8 @@ scripts/                本地开发和检查脚本
 适合本地试跑和开发预览。该方式会自动启动 Node、PostgreSQL 和 Redis，并自动安装依赖、执行数据库迁移。
 
 ```bash
-git clone https://github.com/ashvvvvv/incudal-.git
-cd incudal
+git clone https://github.com/Furina-Lee/incudal-panel.git
+cd incudal-panel
 docker compose -f docker-compose.dev.yml up
 ```
 
@@ -79,12 +79,12 @@ docker compose -f docker-compose.dev.yml down -v
 这是新安装推荐方式。Compose 只启动 Incudal 和 Redis 7；PostgreSQL 必须由用户提前准备在外部主机、云数据库或独立数据库服务中。安装器会先使用临时 PostgreSQL 客户端容器验证网络、认证和目标数据库访问，验证失败不会生成最终配置或启动应用。首次应用启动时才会在已验证的数据库上执行 `prisma migrate deploy` 创建新结构，不执行 `RESET_DATABASE`，也不导入或覆盖已有数据。
 
 ```bash
-git clone https://github.com/ashvvvvv/incudal-.git
-cd incudal
+git clone https://github.com/Furina-Lee/incudal-panel.git
+cd incudal-panel
 sudo bash scripts/install-docker.sh
 ```
 
-安装器会创建 `/opt/incudal/.env`，生成应用密钥和 Redis 密码，并使用固定的 `stable` 镜像标签；外部 PostgreSQL 密码只用于验证并写入经过 URL 编码的连接串。也可以直接从源码部署：
+安装前需先在 GitHub 仓库的 **Actions → Docker Build & Push → Run workflow** 中手动运行一次，并将镜像标签设为 `stable`；工作流成功后，安装器会拉取 `ghcr.io/furina-lee/incudal-panel:stable`。安装器会创建 `/opt/incudal/.env`，生成应用密钥和 Redis 密码；外部 PostgreSQL 密码会写入经过 URL 编码的连接串。也可以直接从源码部署：
 
 ```bash
 cp .env.example .env
@@ -129,7 +129,7 @@ pg_dump "$(grep '^DATABASE_URL=' /opt/incudal/.env | cut -d= -f2-)" > incudal-$(
 Agent 正式二进制不存放在面板仓库内，面板运行时会从 GitHub Release 查询和代理下载。如部署在私有仓库或 fork，可按需配置：
 
 ```env
-INCUDAL_AGENT_RELEASE_REPOSITORY=ashvvvvv/incudal-
+INCUDAL_AGENT_RELEASE_REPOSITORY=Furina-Lee/incudal-panel
 INCUDAL_AGENT_RELEASE_TOKEN=github_pat_xxx
 ```
 

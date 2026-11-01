@@ -1836,7 +1836,7 @@ show_result() {
 #!/bin/bash
 # Incudal 节点管理快捷入口 - 自动下载最新版本
 SCRIPT_CACHE="/root/incudal.sh"
-SCRIPT_URL="https://raw.githubusercontent.com/ashvvvvv/incudal-/master/server/templates/install.sh"
+SCRIPT_URL="https://raw.githubusercontent.com/Furina-Lee/incudal-panel/master/server/templates/install.sh"
 echo "正在获取最新的节点管理脚本..."
 if curl --proto '=https' --tlsv1.2 -sSfL "$SCRIPT_URL" -o "$SCRIPT_CACHE" 2>/dev/null; then
     chmod +x "$SCRIPT_CACHE"
