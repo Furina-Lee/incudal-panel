@@ -68,6 +68,7 @@ server/certs/*.pem
 .docker/
 
 # ==================== 临时文件 ====================
+/incudal/
 tmp/
 temp/
 .cache/
