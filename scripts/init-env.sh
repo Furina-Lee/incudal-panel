@@ -80,9 +80,7 @@ EOF_ENV
     info "已创建 ${ENV_FILE}"
 fi
 
-set_env_if_missing "POSTGRES_USER" "incudal" "PostgreSQL 用户"
-set_env_if_missing "POSTGRES_PASSWORD" "$(gen_password 24)" "PostgreSQL 密码"
-set_env_if_missing "POSTGRES_DB" "incudal" "PostgreSQL 数据库名"
+set_env_if_missing "DATABASE_SSL_MODE" "require" "PostgreSQL SSL 模式"
 set_env_if_missing "REDIS_PASSWORD" "$(gen_password 24)" "Redis 密码"
 set_env_if_missing "JWT_SECRET" "$(gen_secret 48)" "JWT 密钥"
 set_env_if_missing "COOKIE_SECRET" "$(gen_secret 48)" "Cookie 密钥"
@@ -94,4 +92,7 @@ set_env_if_missing "DISABLE_REQUEST_LOG" "true" "请求日志开关"
 
 chmod 600 "$ENV_FILE"
 log "环境配置已就绪: ${ENV_FILE}"
+if [[ -z "$(get_env_value DATABASE_URL)" ]]; then
+    info "请手动设置外部 PostgreSQL 的 DATABASE_URL；生产 Compose 不会创建 PostgreSQL 容器。"
+fi
 info "请备份 ${ENV_FILE}，尤其是 ENCRYPTION_KEY，生产环境不能随意更换。"

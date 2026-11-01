@@ -29,6 +29,7 @@ import {
 import { deleteInstance as deleteIncusInstance, getIncusClient } from '../lib/incus/index.js'
 import { rollbackResources } from '../db/index.js'
 import { sendReleaseNotification } from '../lib/release-notifier.js'
+import { reconcileRechargeRecord } from './payment-reconciliation.js'
 
 // 并发限制
 const limit = pLimit(5)
@@ -506,6 +507,59 @@ async function notifyExpiringInstances(days: number): Promise<void> {
   )
 }
 
+// ==================== 充值订单核对任务 ====================
+
+const RECONCILE_GRACE_MS = 2 * 60 * 1000
+const RECONCILE_BATCH_SIZE = 25
+const RECONCILE_CONCURRENCY = pLimit(3)
+let reconciliationRunning = false
+const reconciliationNextAttempt = new Map<number, number>()
+const reconciliationFailures = new Map<number, number>()
+
+/** Query only recent, non-expired pending/paid records and back off on inconclusive results. */
+async function reconcilePendingRechargeOrders(): Promise<void> {
+  if (reconciliationRunning) return
+  reconciliationRunning = true
+  const now = Date.now()
+  try {
+    const records = await prisma.rechargeRecord.findMany({
+      where: {
+        status: { in: ['pending', 'paid'] },
+        createdAt: { lte: new Date(now - RECONCILE_GRACE_MS) },
+        OR: [{ expiredAt: null }, { expiredAt: { gt: new Date(now) } }],
+        provider: { type: { in: ['yipay', 'heleket'] } }
+      },
+      include: { provider: true },
+      orderBy: { createdAt: 'asc' },
+      take: RECONCILE_BATCH_SIZE
+    })
+
+    await Promise.all(records.map(record => RECONCILE_CONCURRENCY(async () => {
+      if ((reconciliationNextAttempt.get(record.id) || 0) > Date.now()) return
+      try {
+        const result = await reconcileRechargeRecord(record, 'scheduled_reconcile')
+        if (result.reconciled || result.reviewRequired) {
+          reconciliationNextAttempt.delete(record.id)
+          reconciliationFailures.delete(record.id)
+        } else {
+          reconciliationNextAttempt.set(record.id, Date.now() + (result.message.includes('未支付') ? 5 : 15) * 60 * 1000)
+        }
+        console.info(`[Billing] Recharge reconciliation ${record.orderNo}: ${result.status}; ${result.message}`)
+      } catch (error) {
+        const attempts = (reconciliationFailures.get(record.id) || 0) + 1
+        reconciliationFailures.set(record.id, attempts)
+        const delayMs = Math.min(60, 5 * 2 ** Math.min(attempts - 1, 4)) * 60 * 1000
+        reconciliationNextAttempt.set(record.id, Date.now() + delayMs)
+        console.warn(`[Billing] Recharge reconciliation failed for ${record.orderNo}:`, error)
+      }
+    })))
+  } catch (error) {
+    console.error('[Billing] Recharge reconciliation batch failed:', error)
+  } finally {
+    reconciliationRunning = false
+  }
+}
+
 // ==================== 充值订单清理任务 ====================
 
 /**
@@ -580,6 +634,11 @@ export function startBillingScheduler(): void {
   // 每天凌暨3点检查到期删除
   schedule('0 3 * * *', () => {
     executeExpiryDelete().catch(console.error)
+  })
+
+  // 每5分钟核对支付平台仍待处理的充值订单
+  schedule('*/5 * * * *', () => {
+    reconcilePendingRechargeOrders().catch(console.error)
   })
 
   // 每小时检查到期提醒

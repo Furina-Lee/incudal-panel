@@ -212,6 +212,7 @@ export default {
         helpManage: 'Help',
         oauth: 'OAuth',
         broadcast: 'Broadcast',
+        status: 'Status',
         paymentProviders: 'Payment Providers',
         billing: 'Billing',
         withdrawals: 'Withdrawals',
@@ -239,6 +240,10 @@ export default {
         myPackageEdit: 'Edit Package',
         telegramSettings: 'Telegram Settings',
         adminCreateInstance: 'Admin Create Instance',
+    },
+
+    status: {
+        title: 'System Status', description: 'Current service health and incident updates.', adminTitle: 'Status Management', adminDescription: 'Manage public components and incidents without exposing infrastructure details.', components: 'Components', incidents: 'Incidents', noComponents: 'No components configured.', noIncidents: 'No incidents reported.', operational: 'Operational', degraded: 'Degraded', markOperational: 'Mark operational', markDegraded: 'Mark degraded', componentName: 'Component name', componentDescription: 'Public description', incidentTitle: 'Incident title', incidentBody: 'Public incident update', investigating: 'Investigating', identified: 'Identified', monitoring: 'Monitoring', resolved: 'Resolved', resolve: 'Resolve', none: 'No impact', minor: 'Minor impact', major: 'Major impact', critical: 'Critical impact', maintenance: 'Scheduled maintenance', noMaintenance: 'No scheduled maintenance.', scheduled: 'Scheduled', active: 'In progress', completed: 'Completed', cancelled: 'Cancelled', maintenanceTitle: 'Maintenance title', maintenanceBody: 'Public maintenance details', startsAt: 'Starts at', endsAt: 'Ends at', createMaintenance: 'Schedule maintenance', saveMaintenance: 'Save changes', cancelMaintenance: 'Cancel maintenance', maintenanceUpdate: 'Post a maintenance update', postUpdate: 'Post update'
     },
 
     // Theme
@@ -3734,6 +3739,12 @@ export default {
             // Host status
             agentStatusTitle: 'Host Status',
             agentStatusDesc: 'Agent reports live host resources and runtime status every {seconds} seconds',
+            incusVersionLabel: 'Incus version',
+            incusApiLabel: 'Incus API',
+            incusCompatibilityTarget: 'Compatibility target: Incus {version}',
+            incusCompatibilityReady: 'Meets minimum target; functional tests still required',
+            incusCompatibilityOlder: 'Below the tested target; verify in staging',
+            incusCompatibilityUnknown: 'Version information unavailable',
             agentStatusRefreshSuccess: 'Host status refreshed',
             agentStatusLoadFailed: 'Failed to load host status',
             agentNotInstalled: 'Not installed',
@@ -4552,6 +4563,7 @@ export default {
             tradeNo: 'Trade No.',
             sync: 'Sync',
             syncSuccess: 'Sync successful, recharge completed',
+            reconciliationReview: 'Payment needs manual review; no balance was credited',
             rechargeStatus: {
                 pending: 'Pending',
                 completed: 'Completed',

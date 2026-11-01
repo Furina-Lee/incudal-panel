@@ -41,6 +41,9 @@ jobs:
       - name: Type check (server)
         run: pnpm --filter server type-check
 
+      - name: Test installer safety
+        run: pnpm --filter server test:installer-safety
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:

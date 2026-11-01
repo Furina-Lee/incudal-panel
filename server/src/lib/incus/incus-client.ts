@@ -7,9 +7,11 @@ import { Agent, request } from 'undici'
 import { readFileSync } from 'fs'
 import type {
   IncusClientOptions,
-  IncusApiResponse
+  IncusApiResponse,
+  IncusServerInfo
 } from '../../types/incus.js'
 import { waitForOperation } from './incus-utils.js'
+import { evaluateIncusCompatibility, type IncusCompatibilityResult } from './incus-compatibility.js'
 
 export class IncusClient {
   baseUrl: string
@@ -17,6 +19,8 @@ export class IncusClient {
   keyPath: string | null
   agent: Agent | null = null
   connected: boolean = false
+  serverInfo: IncusServerInfo | null = null
+  compatibility: IncusCompatibilityResult | null = null
 
   constructor(options: IncusClientOptions) {
     this.baseUrl = IncusClient.normalizeUrl(options.url)
@@ -83,6 +87,8 @@ export class IncusClient {
 
       // 测试连接
       const info = await this.getServerInfo()
+      this.serverInfo = info
+      this.compatibility = evaluateIncusCompatibility(info)
       this.connected = true
       return info
     } catch (error) {
@@ -101,7 +107,7 @@ export class IncusClient {
       throw new Error('Incus 客户端未连接')
     }
 
-    const url = `${this.baseUrl}${path}`
+    const url = new URL(path, `${this.baseUrl}/`).toString()
     const options: {
       method: string
       dispatcher: Agent
@@ -115,11 +121,11 @@ export class IncusClient {
       }
     }
 
-    if (body) {
+    if (body !== null && body !== undefined) {
       options.body = JSON.stringify(body)
     }
 
-    const response = await request(url, options)
+    const response = await request(url, { ...options, headersTimeout: timeout, bodyTimeout: timeout })
     const text = await response.body.text()
     
     // Try to parse JSON, handle non-JSON responses (e.g., mTLS errors)
@@ -138,6 +144,15 @@ export class IncusClient {
       throw new Error(text || `HTTP ${response.statusCode}`)
     }
 
+    if (!data || typeof data !== 'object' || typeof data.type !== 'string') {
+      throw new Error(`Invalid Incus API response (HTTP ${response.statusCode})`)
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      const message = data.error || data.err || data.status || `HTTP ${response.statusCode}`
+      throw new Error(message)
+    }
+
     // Incus API 返回格式: { type: "sync/async", status: "Success", metadata: {...} }
     if (data.type === 'error') {
       // 记录错误日志
@@ -150,11 +165,12 @@ export class IncusClient {
     }
 
     // 异步操作需要等待完成
-    if (data.type === 'async' && data.operation) {
+    if (data.type === 'async') {
+      if (!data.operation) throw new Error('Incus async response is missing its operation URL')
       return await waitForOperation(this, data.operation, timeout) as T
     }
 
-    return (data.metadata || data) as T
+    return (data.metadata !== undefined ? data.metadata : data) as T
   }
 
   /**
@@ -178,7 +194,7 @@ export class IncusClient {
       throw new Error('Incus 客户端未连接')
     }
 
-    const url = `${this.baseUrl}${path}`
+    const url = new URL(path, `${this.baseUrl}/`).toString()
     const response = await request(url, {
       method: 'GET',
       dispatcher: this.agent,
@@ -195,8 +211,22 @@ export class IncusClient {
 
   // ==================== 服务器信息 ====================
 
-  async getServerInfo(): Promise<unknown> {
-    return this.request('GET', '/1.0')
+  async getServerInfo(): Promise<IncusServerInfo> {
+    const info = await this.request<IncusServerInfo>('GET', '/1.0')
+    if (!info || typeof info.api_version !== 'string' || !info.environment?.server_version) {
+      throw new Error('Incus /1.0 response is missing API or server version metadata')
+    }
+    this.serverInfo = info
+    return info
+  }
+
+  getCapabilities(): { apiVersion: string; serverVersion: string; extensions: string[] } | null {
+    if (!this.serverInfo) return null
+    return {
+      apiVersion: this.serverInfo.api_version,
+      serverVersion: this.serverInfo.environment?.server_version || '',
+      extensions: Array.isArray(this.serverInfo.api_extensions) ? [...this.serverInfo.api_extensions] : []
+    }
   }
 
   async getResources(): Promise<unknown> {
@@ -211,6 +241,8 @@ export class IncusClient {
       await this.agent.close()
       this.agent = null
       this.connected = false
+      this.serverInfo = null
+      this.compatibility = null
     }
   }
 }

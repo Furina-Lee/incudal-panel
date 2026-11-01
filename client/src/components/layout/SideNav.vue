@@ -92,6 +92,7 @@ const adminOnlyMenuItems: MenuItem[] = [
   { name: 'tickets', path: '/tickets', icon: 'ticket', label: 'nav.tickets' },
   { name: 'admin-billing', path: '/admin/billing', icon: 'wallet', label: 'nav.billing' },
   { name: 'admin-broadcast', path: '/admin/broadcast', icon: 'bell', label: 'nav.broadcast' },
+  { name: 'admin-status', path: '/admin/status', icon: 'chart', label: 'nav.status' },
   { name: 'admin-logs', path: '/logs', icon: 'logs', label: 'nav.logs' },
   { name: 'admin-help', path: '/admin/help', icon: 'book', label: 'nav.helpManage' },
   { name: 'admin-entertainment', path: '/admin/entertainment', icon: 'gift', label: 'nav.entertainment' },
@@ -158,7 +159,7 @@ function handleLinkClick() {
   <!-- Sidebar -->
   <aside 
     :class="[
-      'flex flex-col min-h-full transition-all duration-200 border-r z-50',
+      'operator-sidebar flex flex-col min-h-full transition-all duration-200 border-r z-50',
       // 移动端：mobileOpen 为 true 时显示，否则隐藏
       // 桌面端：始终显示 (md:flex)
       mobileOpen ? 'flex' : 'hidden md:flex',
@@ -196,7 +197,7 @@ function handleLinkClick() {
     </div>
 
     <!-- 导航菜单 -->
-    <nav class="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
+    <nav class="operator-nav flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
       <template v-for="item in menuItems" :key="item.name || item.label">
         <!-- 分隔线 -->
         <div v-if="item.divider" class="pt-3 pb-2">
@@ -219,7 +220,7 @@ function handleLinkClick() {
           v-else
           :to="item.path || '/'"
           :class="[
-            'flex items-center py-1.5 rounded text-sm transition-colors',
+            'operator-nav-link flex items-center py-1.5 rounded text-sm transition-colors',
             collapsed && !mobileOpen ? 'justify-center px-0' : 'gap-2.5 px-2',
             isActive(item) 
               ? (themeStore.isDark ? 'bg-gray-800 text-gray-100' : 'bg-gray-100 text-gray-900')

@@ -80,6 +80,7 @@ import agentRoutes from './routes/agent.js'
 import userInviteRoutes from './routes/user-invites.js'
 import vipLevelRoutes from './routes/vip-levels.js'
 import vipBenefitRoutes from './routes/vip-benefits.js'
+import statusRoutes from './routes/status.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -518,6 +519,7 @@ await fastify.register(agentRoutes, { prefix: '/api/agent' })
 await fastify.register(userInviteRoutes, { prefix: '/api/user-invites' })
 await fastify.register(vipLevelRoutes)
 await fastify.register(vipBenefitRoutes)
+await fastify.register(statusRoutes, { prefix: '/api/status' })
 
 // 生产环境：托管前端静态文件
 if (process.env.NODE_ENV === 'production') {
@@ -719,6 +721,10 @@ const start = async (): Promise<void> => {
     // 启动实例状态同步调度器
     const { startStatusScheduler } = await import('./services/status-scheduler.js')
     startStatusScheduler()
+
+    // 启动状态页维护窗口生命周期调度器
+    const { startMaintenanceScheduler } = await import('./services/maintenance-scheduler.js')
+    startMaintenanceScheduler()
 
     // 启动实例操作任务调度器
     const { cleanupStaleTasks: cleanupStaleInstanceTasks, startInstanceTaskWorker } = await import('./workers/instanceTaskWorker.js')

@@ -6,7 +6,7 @@
 #   - 自动安装 Docker Engine 和 Docker Compose
 #   - 从 GitHub Container Registry (ghcr.io) 拉取预构建镜像
 #   - 自动配置 docker-compose.yml、环境变量
-#   - PostgreSQL 16 + Redis 7 全容器化运行
+#   - 外部 PostgreSQL + 容器内 Redis 7
 #   - 支持 Nginx+Certbot / Cloudflare Tunnel / 纯端口 三种外部访问方案
 #   - 支持升级和卸载
 #
@@ -15,18 +15,26 @@
 #   升级：  sudo bash install-docker.sh --upgrade
 #   卸载：  sudo bash install-docker.sh --uninstall
 #
-# 项目地址: https://github.com/0xdabiaoge/incudal
+# 项目地址: https://github.com/ashvvvvv/incudal-
 # ============================================================================
 set -euo pipefail
 
 # ========================== 全局常量 ==========================
 readonly SCRIPT_VERSION="1.0.0"
-readonly GITHUB_REPO="0xdabiaoge/incudal"
+readonly GITHUB_REPO="ashvvvvv/incudal-"
 readonly DOCKER_IMAGE="ghcr.io/${GITHUB_REPO}"
 readonly INSTALL_DIR="/opt/incudal"
 readonly ENV_FILE="${INSTALL_DIR}/.env"
 readonly COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
 readonly DEFAULT_PORT=3000
+PURGE_DATA="false"
+DATABASE_URL=""
+DATABASE_HOST=""
+DATABASE_PORT="5432"
+DATABASE_NAME="incudal"
+DATABASE_USER="incudal"
+DATABASE_PASSWORD=""
+DATABASE_SSL_MODE="require"
 
 # ========================== 颜色定义 ==========================
 readonly RED='\033[1;31m'
@@ -103,7 +111,6 @@ ensure_env_keys() {
         return 0
     fi
 
-    set_env_if_missing "POSTGRES_PASSWORD" "$(gen_password 24)" "PostgreSQL 密码"
     set_env_if_missing "REDIS_PASSWORD" "$(gen_password 24)" "Redis 密码"
     set_env_if_missing "JWT_SECRET" "$(gen_secret 48)" "JWT 密钥"
     set_env_if_missing "COOKIE_SECRET" "$(gen_secret 48)" "Cookie 密钥"
@@ -242,6 +249,71 @@ generate_panel_cert() {
     log "面板客户端证书生成完成"
 }
 
+# ========================== 外部 PostgreSQL 验证 ==========================
+urlencode_component() {
+    python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
+}
+
+validate_database_input() {
+    [[ "$DATABASE_HOST" =~ ^[a-zA-Z0-9._:-]+$ ]] || { error "PostgreSQL 主机名或地址格式无效"; return 1; }
+    [[ "$DATABASE_PORT" =~ ^[0-9]+$ ]] && (( DATABASE_PORT >= 1 && DATABASE_PORT <= 65535 )) || { error "PostgreSQL 端口必须为 1-65535"; return 1; }
+    [[ "$DATABASE_NAME" =~ ^[a-zA-Z_][a-zA-Z0-9_$-]{0,62}$ ]] || { error "数据库名格式无效"; return 1; }
+    [[ "$DATABASE_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_$-]{0,62}$ ]] || { error "数据库用户名格式无效"; return 1; }
+    [[ "$DATABASE_SSL_MODE" =~ ^(disable|allow|prefer|require|verify-ca|verify-full)$ ]] || { error "SSL 模式无效"; return 1; }
+}
+
+build_database_url() {
+    local encoded_user encoded_password encoded_database
+    encoded_user=$(urlencode_component "$DATABASE_USER")
+    encoded_password=$(urlencode_component "$DATABASE_PASSWORD")
+    encoded_database=$(urlencode_component "$DATABASE_NAME")
+    DATABASE_URL="postgresql://${encoded_user}:${encoded_password}@${DATABASE_HOST}:${DATABASE_PORT}/${encoded_database}?sslmode=${DATABASE_SSL_MODE}"
+}
+
+validate_external_database() {
+    step "验证外部 PostgreSQL 连接..."
+    validate_database_input || return 1
+    build_database_url
+
+    local client_image="postgres:16-alpine"
+    info "正在验证 ${DATABASE_HOST}:${DATABASE_PORT}/${DATABASE_NAME} 的网络、认证和数据库访问权限..."
+    if ! docker run --rm --network host \
+        -e "PGPASSWORD=${DATABASE_PASSWORD}" \
+        "$client_image" \
+        psql "host=${DATABASE_HOST} port=${DATABASE_PORT} dbname=${DATABASE_NAME} user=${DATABASE_USER} sslmode=${DATABASE_SSL_MODE} connect_timeout=8" \
+        -v ON_ERROR_STOP=1 -Atqc 'SELECT 1' >/dev/null 2>&1; then
+        error "PostgreSQL 验证失败：请检查地址、端口、防火墙、数据库名、用户名、密码和 TLS 设置"
+        DATABASE_URL=""
+        return 1
+    fi
+    log "外部 PostgreSQL 连接、认证和数据库访问验证通过"
+}
+
+prompt_external_database() {
+    if [[ -n "$(get_env_value DATABASE_URL)" ]]; then
+        DATABASE_URL="$(get_env_value DATABASE_URL)"
+        info "检测到已保存的外部 DATABASE_URL；正在验证其可用性"
+        if docker run --rm --network host -e "DATABASE_URL=${DATABASE_URL}" postgres:16-alpine \
+          sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atqc "SELECT 1"' >/dev/null 2>&1; then
+            log "已保存的外部 PostgreSQL 连接验证通过"
+            return 0
+        fi
+        error "已保存的 DATABASE_URL 无法连接，请重新输入 PostgreSQL 信息"
+    fi
+
+    while true; do
+        echo -ne "  PostgreSQL 主机/IP: " >&2; read -r DATABASE_HOST
+        echo -ne "  PostgreSQL 端口 [5432]: " >&2; read -r input_port; DATABASE_PORT="${input_port:-5432}"
+        echo -ne "  数据库名 [incudal]: " >&2; read -r input_name; DATABASE_NAME="${input_name:-incudal}"
+        echo -ne "  数据库用户名 [incudal]: " >&2; read -r input_user; DATABASE_USER="${input_user:-incudal}"
+        echo -ne "  数据库密码（不会显示）: " >&2; read -rs DATABASE_PASSWORD; echo >&2
+        echo -ne "  SSL 模式 [require]: " >&2; read -r input_ssl; DATABASE_SSL_MODE="${input_ssl:-require}"
+        if validate_external_database; then return 0; fi
+        echo -ne "  验证失败，重新输入？[Y/n]: " >&2; read -r retry
+        [[ "${retry:-y}" =~ ^[Yy]$ ]] || return 1
+    done
+}
+
 # ========================== 生成 .env 文件 ==========================
 generate_env() {
     step "生成环境配置..."
@@ -249,11 +321,17 @@ generate_env() {
     if [[ -f "$ENV_FILE" ]]; then
         info ".env 文件已存在，检查并补齐缺失的密钥配置"
         ensure_env_keys
+        if [[ -n "$DATABASE_URL" && -z "$(get_env_value DATABASE_URL)" ]]; then
+            printf '\nDATABASE_URL=%s\n' "$DATABASE_URL" >> "$ENV_FILE"
+            chmod 600 "$ENV_FILE"
+        fi
         return 0
     fi
 
-    local pg_password
-    pg_password=$(gen_password 24)
+    if [[ -z "$DATABASE_URL" ]]; then
+        error "未验证外部 PostgreSQL，无法生成应用配置"
+        return 1
+    fi
     local redis_password
     redis_password=$(gen_password 24)
     local jwt_secret
@@ -271,10 +349,8 @@ generate_env() {
 # 由安装脚本自动生成于 $(date '+%Y-%m-%d %H:%M:%S')
 # ============================================================================
 
-# ============ 数据库配置 ============
-POSTGRES_USER=incudal
-POSTGRES_PASSWORD=${pg_password}
-POSTGRES_DB=incudal
+# ============ 外部 PostgreSQL 配置（已在安装前验证）============
+DATABASE_URL=${DATABASE_URL}
 
 # ============ Redis 配置 ============
 REDIS_PASSWORD=${redis_password}
@@ -298,7 +374,7 @@ EOF
     chmod 600 "$ENV_FILE"
     log "环境配置文件生成完成: ${ENV_FILE}"
     info "管理员密码: ${admin_password}"
-    info "PostgreSQL 密码: ${pg_password}"
+    info "外部 PostgreSQL 连接已验证；密码不会在日志中显示"
 }
 
 # ========================== 生成 docker-compose.yml ==========================
@@ -313,15 +389,21 @@ generate_compose() {
     cat > "$COMPOSE_FILE" << 'COMPOSEFILE'
 services:
   app:
-    image: ghcr.io/0xdabiaoge/incudal:latest
+    image: ${INCUDAL_IMAGE:-ghcr.io/ashvvvvv/incudal-:stable}
     ports:
-      - "${APP_PORT:-3000}:3000"
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     environment:
       - NODE_ENV=production
       - HOST=0.0.0.0
       - PORT=3000
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-incudal}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-incudal}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - JWT_SECRET=${JWT_SECRET}
       - COOKIE_SECRET=${COOKIE_SECRET:-}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
@@ -333,36 +415,25 @@ services:
     volumes:
       - ./server/certs:/app/server/certs:ro
     depends_on:
-      db:
-        condition: service_healthy
       redis:
-        condition: service_started
-    restart: unless-stopped
-
-  db:
-    image: postgres:16-alpine
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER:-incudal}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB:-incudal}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-incudal}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+        condition: service_healthy
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine
-    command: redis-server --requirepass ${REDIS_PASSWORD:-}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     volumes:
       - redis_data:/data
     restart: unless-stopped
 
 volumes:
-  postgres_data:
   redis_data:
 
 networks:
@@ -393,9 +464,12 @@ start_docker() {
     # 等待服务就绪
     info "等待服务启动..."
     local retries=0
-    local max_retries=30
+    local max_retries=60
+    local app_port
+    app_port=$(get_env_value "APP_PORT")
+    app_port=${app_port:-$DEFAULT_PORT}
     while [[ $retries -lt $max_retries ]]; do
-        if curl -sf "http://127.0.0.1:${DEFAULT_PORT}/api/health" &>/dev/null 2>&1; then
+        if curl -sf "http://127.0.0.1:${app_port}/api/health" &>/dev/null 2>&1; then
             log "服务启动成功！"
             return 0
         fi
@@ -482,8 +556,11 @@ NGINX
 
 # ========================== Cloudflare Tunnel ==========================
 setup_cf_tunnel() {
+    local app_port
+    app_port=$(get_env_value "APP_PORT")
+    app_port=${app_port:-$DEFAULT_PORT}
     info "请前往 Cloudflare Zero Trust 控制台创建 Tunnel"
-    info "配置 Tunnel 时，将 Public Hostname 指向 http://127.0.0.1:${DEFAULT_PORT}"
+    info "配置 Tunnel 时，将 Public Hostname 指向 http://127.0.0.1:${app_port}"
     echo ""
     echo -ne "  ${BOLD}请输入你绑定的域名 (用于更新 FRONTEND_URL): ${NC}"
     read -r CF_DOMAIN
@@ -561,8 +638,11 @@ do_upgrade() {
     # 等待服务就绪
     info "等待服务启动..."
     local retries=0
-    while [[ $retries -lt 20 ]]; do
-        if curl -sf "http://127.0.0.1:${DEFAULT_PORT}/api/health" &>/dev/null 2>&1; then
+    local app_port
+    app_port=$(get_env_value "APP_PORT")
+    app_port=${app_port:-$DEFAULT_PORT}
+    while [[ $retries -lt 60 ]]; do
+        if curl -sf "http://127.0.0.1:${app_port}/api/health" &>/dev/null 2>&1; then
             break
         fi
         retries=$((retries + 1))
@@ -576,7 +656,11 @@ do_upgrade() {
 # ========================== 卸载 ==========================
 do_uninstall() {
     show_banner
-    echo -e "  ${RED}${BOLD}⚠  警告：卸载将删除所有 Incudal 数据！${NC}" >&2
+    if [[ "$PURGE_DATA" == "true" ]]; then
+        echo -e "  ${RED}${BOLD}⚠  警告：此操作将删除 Incudal 容器、数据库和 Redis 数据卷！${NC}" >&2
+    else
+        echo -e "  ${YELLOW}${BOLD}卸载将移除容器和安装目录，但默认保留数据库与 Redis 数据卷。${NC}" >&2
+    fi
     echo "" >&2
     echo -ne "  ${BOLD}确认卸载？输入 'yes' 继续: ${NC}"
     read -r confirm
@@ -591,7 +675,11 @@ do_uninstall() {
     if [[ -f "$COMPOSE_FILE" ]]; then
         cd "$INSTALL_DIR"
         info "停止并移除容器..."
-        docker compose down -v 2>/dev/null || true
+        if [[ "$PURGE_DATA" == "true" ]]; then
+            docker compose down -v 2>/dev/null || true
+        else
+            docker compose down 2>/dev/null || true
+        fi
     fi
 
     # 移除 Nginx 配置
@@ -638,6 +726,9 @@ do_install() {
     # 安装 Docker
     install_docker
 
+    # 采集并验证外部 PostgreSQL；失败时不会创建证书、写配置或启动应用
+    prompt_external_database
+
     # 创建安装目录
     mkdir -p "${INSTALL_DIR}/server/certs"
 
@@ -652,7 +743,7 @@ do_install() {
 
     # 登录 GHCR（私有仓库需要）
     step "配置镜像仓库访问..."
-    if docker pull "${DOCKER_IMAGE}:latest" &>/dev/null 2>&1; then
+    if docker pull "${DOCKER_IMAGE}:${IMAGE_TAG:-stable}" &>/dev/null 2>&1; then
         log "镜像仓库可访问"
     else
         warn "无法拉取镜像（仓库可能是私有的）"
@@ -739,6 +830,10 @@ main() {
         --uninstall|--remove)
             do_uninstall
             ;;
+        --purge-data)
+            PURGE_DATA="true"
+            do_uninstall
+            ;;
         --help|-h)
             echo "Incudal 面板部署脚本（Docker 模式）v${SCRIPT_VERSION}"
             echo ""
@@ -747,7 +842,8 @@ main() {
             echo "选项:"
             echo "  (无参数)      全新安装"
             echo "  --upgrade     拉取最新镜像并重建"
-            echo "  --uninstall   卸载 Incudal（包含数据）"
+            echo "  --uninstall   卸载 Incudal（默认保留数据库/Redis 数据卷）"
+            echo "  --purge-data  卸载并删除数据库/Redis 数据卷（不可逆）"
             echo "  --help        显示帮助"
             ;;
         *)

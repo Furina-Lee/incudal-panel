@@ -49,6 +49,7 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
+ENV HEALTHCHECK_URL=http://127.0.0.1:3000/api/health
 
 # 创建非 root 用户
 RUN addgroup --system --gid 1001 nodejs && \
@@ -81,5 +82,7 @@ RUN mkdir -p server/certs && chown -R incudal:nodejs server/certs
 USER incudal
 
 EXPOSE 3000
+
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=12 CMD node -e "fetch(process.env.HEALTHCHECK_URL).then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
 
 ENTRYPOINT ["./server/docker-entrypoint.sh"]

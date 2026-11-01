@@ -30,7 +30,10 @@ INJECT_AGENT_ENABLED="true"
 PANEL_URL="${INJECT_PANEL_URL:-}"
 PANEL_URL="${PANEL_URL%/}"
 readonly PANEL_URL
-readonly SCRIPT_VERSION="2.0.0"
+readonly SCRIPT_VERSION="2.1.0"
+readonly INCUS_TARGET_VERSION="7.6.0"
+readonly INCUS_APT_PREFERENCES_FILE="/etc/apt/preferences.d/incudal-incus.pref"
+readonly INSTALLER_OWNERSHIP_MARKER="/etc/incudal/installer-owned"
 readonly BRIDGE_SUBNET="10.10.0.1/22"
 readonly BRIDGE_NAME="incusbr0"
 readonly PRESEED_FILE="/tmp/.incus-preseed-$$.yaml"
@@ -75,6 +78,39 @@ info()  { echo -e "${BLUE}[i]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
 error() { echo -e "${RED}[✗]${NC} $1"; }
 step()  { echo -e "\n${CYAN}[▶]${NC} ${BOLD}$1${NC}"; }
+
+require_arg_value() {
+    local option="$1" value="${2:-}"
+    if [[ -z "$value" || "$value" == --* ]]; then
+        error "${option} requires a value"
+        exit 2
+    fi
+}
+
+validate_install_inputs() {
+    if [[ -n "$PANEL_URL" && "$PANEL_URL" != https://* ]]; then
+        error "Panel URL must use HTTPS"
+        exit 2
+    fi
+    [[ "$MODE" == "nat" || "$MODE" == "nat_ipv6" ]] || { error "--mode must be nat or nat_ipv6"; exit 2; }
+    [[ "$TOKEN" =~ ^[a-zA-Z0-9_-]{16,}$ ]] || { error "Token must contain at least 16 letters, digits, underscores, or hyphens"; exit 2; }
+    [[ "${LISTEN_PORT:-}" =~ ^[0-9]{1,5}$ ]] && (( 10#$LISTEN_PORT >= 1 && 10#$LISTEN_PORT <= 65535 )) || { error "Port must be an integer from 1 to 65535"; exit 2; }
+    if [[ -n "${IPV6_SUBNET:-}" ]]; then
+        [[ "$IPV6_SUBNET" =~ ^[0-9A-Fa-f:]+/[0-9]{1,3}$ ]] || { error "IPv6 subnet must be an IPv6 CIDR"; exit 2; }
+        local prefix="${IPV6_SUBNET##*/}"
+        (( 10#$prefix <= 128 )) || { error "IPv6 prefix must be from 0 to 128"; exit 2; }
+        if command -v python3 >/dev/null 2>&1; then
+            python3 -c 'import ipaddress,sys; ipaddress.IPv6Network(sys.argv[1], strict=False)' "$IPV6_SUBNET" >/dev/null 2>&1 || { error "Invalid IPv6 subnet"; exit 2; }
+        fi
+    fi
+    if [[ -n "${IPV6_IFACE:-}" ]]; then
+        [[ "$IPV6_IFACE" =~ ^[a-zA-Z0-9_.:-]{1,15}$ ]] || { error "Invalid IPv6 interface name"; exit 2; }
+        if command -v ip >/dev/null 2>&1 && ! ip link show dev "$IPV6_IFACE" >/dev/null 2>&1; then
+            error "IPv6 interface does not exist: $IPV6_IFACE"
+            exit 2
+        fi
+    fi
+}
 
 # 分隔线
 divider() {
@@ -309,10 +345,14 @@ show_system_info() {
         [[ -z "$incus_ver" ]] && incus_ver="未知"
         
         # 判断服务端是否能连通
-        if ! incus version 2>/dev/null | grep -q -E "Server version: [0-9]"; then
+        local incus_server_ver=""
+        incus_server_ver=$(get_incus_server_version || true)
+        if [[ -z "$incus_server_ver" ]]; then
             echo -e "  Incus     :  ${YELLOW}客户端残留（服务未在运行）${NC} (${incus_ver})"
+        elif incus_version_matches_target "$incus_server_ver"; then
+            echo -e "  Incus     :  ${GREEN}已安装并运行${NC} (${incus_server_ver}) [目标 ${INCUS_TARGET_VERSION}]"
         else
-            echo -e "  Incus     :  ${GREEN}已安装并运行${NC} (${incus_ver})"
+            echo -e "  Incus     :  ${YELLOW}版本不符合目标${NC} (${incus_server_ver}，目标 ${INCUS_TARGET_VERSION})"
         fi
 
         # 检查网桥
@@ -1204,7 +1244,7 @@ install_zfs_prebuilt() {
     info "下载地址: ${prebuilt_url}"
 
     # 下载预编译包
-    if ! curl -sSfL --connect-timeout 10 --max-time 60 \
+    if ! curl --proto '=https' --tlsv1.2 -sSfL --connect-timeout 10 --max-time 60 \
         "$prebuilt_url" -o "$tmp_tar" 2>/dev/null; then
         info "未找到内核 ${kernel_ver} 的预编译包"
         rm -f "$tmp_tar" 2>/dev/null || true
@@ -1325,15 +1365,44 @@ install_zfs_dkms() {
 }
 
 # 步骤 3: 安装 Incus
-install_incus() {
-    step "步骤 [3/5]  安装 Incus..."
+get_incus_server_version() {
+    incus version 2>/dev/null | awk -F': ' '/^Server version:/ {print $2; exit}'
+}
 
-    # 幂等性：已安装且服务端正常运行则跳过
-    if incus version 2>/dev/null | grep -q -E "Server version: [0-9]"; then
-        local current_ver
-        current_ver=$(incus version 2>/dev/null | awk '/Client version/ {print $3}' || echo "未知")
-        info "Incus 服务已安装并运行（版本: ${current_ver}），跳过安装"
+incus_version_matches_target() {
+    local version="${1:-}"
+    [[ "$version" =~ (^|:)${INCUS_TARGET_VERSION//./\\.}([+~-].*)?$ ]]
+}
+
+install_incus() {
+    step "步骤 [3/5]  安装 Incus ${INCUS_TARGET_VERSION}..."
+
+    local installed_server_version=""
+    installed_server_version=$(get_incus_server_version || true)
+    if [[ -n "$installed_server_version" ]]; then
+        if ! incus_version_matches_target "$installed_server_version"; then
+            error "检测到已运行 Incus ${installed_server_version}，不会自动降级或替换现有主机数据。"
+            error "请先在维护窗口手动迁移/回滚该节点，再使用此安装流程。目标版本：${INCUS_TARGET_VERSION}"
+            return 1
+        fi
+        local installed_package_version=""
+        installed_package_version=$(dpkg-query -W -f='${Version}' incus 2>/dev/null || true)
+        if [[ -n "$installed_package_version" ]]; then
+            write_incus_apt_pin "$installed_package_version"
+        fi
+        log "Incus 服务端版本已是 ${installed_server_version}，不会重启或替换现有服务"
         return 0
+    fi
+
+    # 如果安装了旧版软件包但服务没有启动，拒绝自动覆盖，以免破坏已有实例数据。
+    if dpkg-query -W -f='${Status}' incus 2>/dev/null | grep -q 'install ok installed'; then
+        local installed_package_version=""
+        installed_package_version=$(dpkg-query -W -f='${Version}' incus 2>/dev/null || true)
+        if [[ "$installed_package_version" != "$INCUS_TARGET_VERSION"* ]]; then
+            error "检测到已安装 Incus 包 ${installed_package_version:-未知}，但服务未运行。为保护现有实例数据，不会自动替换。"
+            error "请先人工确认数据和服务状态，再清理或恢复该节点后重试。"
+            return 1
+        fi
     fi
 
     # 导入 Zabbly GPG 密钥
@@ -1352,9 +1421,39 @@ Architectures: ${ARCH}
 Signed-By: /etc/apt/keyrings/zabbly.gpg
 SRC
 
-    apt-get update -qq 2>/dev/null
-    apt-get install -y -qq incus >/dev/null
-    log "Incus 安装完成"
+    apt-get update -qq
+
+    local target_package_version=""
+    target_package_version=$(apt-cache madison incus | awk -v target="$INCUS_TARGET_VERSION" '{version=$3; sub(/^[0-9]+:/, "", version); if (version == target || index(version, target "+") == 1 || index(version, target "~") == 1 || index(version, target "-") == 1) {print $3; exit}}')
+    if [[ -z "$target_package_version" ]]; then
+        error "Zabbly 仓库未提供 Incus ${INCUS_TARGET_VERSION}（${OS_CODENAME}/${ARCH}）。停止安装，避免安装到其他版本。"
+        return 1
+    fi
+
+    write_incus_apt_pin "$target_package_version"
+    apt-get install -y -qq "incus=${target_package_version}"
+
+    local installed_server_version=""
+    installed_server_version=$(get_incus_server_version || true)
+    if ! incus_version_matches_target "$installed_server_version"; then
+        error "Incus 安装后版本校验失败：期望 ${INCUS_TARGET_VERSION}，实际 ${installed_server_version:-无法读取}"
+        return 1
+    fi
+    log "Incus ${installed_server_version} 安装并锁定完成"
+}
+
+write_incus_apt_pin() {
+    local package_version="$1"
+    if [[ -z "$package_version" ]]; then
+        error "无法确定 Incus APT 包版本，拒绝写入版本锁定"
+        return 1
+    fi
+
+    cat > "$INCUS_APT_PREFERENCES_FILE" <<PREF
+Package: incus
+Pin: version ${package_version}
+Pin-Priority: 1001
+PREF
 }
 
 # 步骤 4: 初始化 Incus
@@ -1484,7 +1583,7 @@ install_incudal_agent() {
     step "附加步骤  安装宿主机 Agent..."
 
     local agent_install_url="${PANEL_URL}/api/agent/install.sh"
-    if curl -fsSL "$agent_install_url" | \
+    if curl --proto '=https' --tlsv1.2 -fsSL "$agent_install_url" | \
         INCUDAL_PANEL_URL="$PANEL_URL" \
         INCUDAL_AGENT_INSTALL_TOKEN="$AGENT_INSTALL_TOKEN" \
         INCUDAL_AGENT_ID="$AGENT_ID" \
@@ -1535,7 +1634,7 @@ run_incudal_agent_installer() {
         info "Agent ID: $(mask_value "$agent_id")"
     fi
 
-    if curl -fsSL "$agent_install_url" | \
+    if curl --proto '=https' --tlsv1.2 -fsSL "$agent_install_url" | \
         INCUDAL_PANEL_URL="$panel_url" \
         INCUDAL_AGENT_INSTALL_TOKEN="$install_token" \
         INCUDAL_AGENT_ID="$agent_id" \
@@ -1737,9 +1836,9 @@ show_result() {
 #!/bin/bash
 # Incudal 节点管理快捷入口 - 自动下载最新版本
 SCRIPT_CACHE="/root/incudal.sh"
-SCRIPT_URL="https://raw.githubusercontent.com/0xdabiaoge/incudal/main/server/templates/install.sh"
+SCRIPT_URL="https://raw.githubusercontent.com/ashvvvvv/incudal-/master/server/templates/install.sh"
 echo "正在获取最新的节点管理脚本..."
-if curl -sSfL "$SCRIPT_URL" -o "$SCRIPT_CACHE" 2>/dev/null; then
+if curl --proto '=https' --tlsv1.2 -sSfL "$SCRIPT_URL" -o "$SCRIPT_CACHE" 2>/dev/null; then
     chmod +x "$SCRIPT_CACHE"
     exec bash "$SCRIPT_CACHE" "$@"
 else
@@ -2018,7 +2117,7 @@ install_rfw() {
 
     for attempt in 1 2 3; do
         info "下载 RFW (第 ${attempt} 次)..."
-        if curl -sSfL --connect-timeout 15 --max-time 120 \
+        if curl --proto '=https' --tlsv1.2 -sSfL --connect-timeout 15 --max-time 120 \
             "$rfw_url" -o "${RFW_INSTALL_DIR}/rfw" 2>/dev/null; then
             download_ok=true
             break
@@ -2149,8 +2248,29 @@ do_rfw_cleanup() {
 
 # ========================== 卸载功能 ==========================
 
+mark_installer_ownership() {
+    install -d -m 0755 "$(dirname "$INSTALLER_OWNERSHIP_MARKER")"
+    printf 'ownership=incudal\nscript_version=%s\nincus_version=%s\n' "$SCRIPT_VERSION" "$INCUS_TARGET_VERSION" > "$INSTALLER_OWNERSHIP_MARKER"
+    chmod 0644 "$INSTALLER_OWNERSHIP_MARKER"
+}
+
+require_uninstall_safety() {
+    if [[ ! -t 0 || ! -t 1 ]]; then
+        error "Uninstall must be run interactively from a terminal"
+        exit 2
+    fi
+    if [[ ! -f "$INSTALLER_OWNERSHIP_MARKER" ]] ||
+       ! grep -q '^ownership=incudal$' "$INSTALLER_OWNERSHIP_MARKER" ||
+       ! grep -q "^incus_version=${INCUS_TARGET_VERSION}$" "$INSTALLER_OWNERSHIP_MARKER"; then
+        error "Refusing to uninstall: valid Incudal ownership marker is missing (${INSTALLER_OWNERSHIP_MARKER})"
+        error "This host may not have been installed by Incudal; back up data and remove it manually if appropriate"
+        exit 2
+    fi
+}
+
 # 卸载确认（双重确认，防止误操作）
 confirm_uninstall() {
+    require_uninstall_safety
     echo ""
     echo -e "  ${RED}${BOLD}╔══════════════════════════════════════════════════╗${NC}"
     echo -e "  ${RED}${BOLD}║              ⚠  卸载警告                        ║${NC}"
@@ -2167,6 +2287,13 @@ confirm_uninstall() {
     echo -e "    ${RED}•${NC}  本脚本添加的内核参数"
     echo ""
     divider
+    echo -ne "  ${RED}${BOLD}已完成容器、存储及配置备份？${NC}输入 BACKUP 确认: "
+    read -r backup_confirm
+    if [[ "$backup_confirm" != "BACKUP" ]]; then
+        info "已取消卸载（需要输入 BACKUP 确认已备份）"
+        exit 0
+    fi
+
     echo -ne "  ${RED}${BOLD}确认要彻底卸载 Incus 节点？${NC}[y/N]: "
     read -r confirm1
     if [[ ! "$confirm1" =~ ^[yY]$ ]]; then
@@ -2342,6 +2469,12 @@ do_uninstall() {
         cleaned=true
     fi
 
+    if [[ -f "$INCUS_APT_PREFERENCES_FILE" ]]; then
+        rm -f "$INCUS_APT_PREFERENCES_FILE"
+        info "已删除: $(basename "$INCUS_APT_PREFERENCES_FILE")"
+        cleaned=true
+    fi
+
     if [[ "$cleaned" == "true" ]]; then
         apt-get update -qq 2>/dev/null || true
         log "APT 源和密钥已清理"
@@ -2474,6 +2607,10 @@ do_uninstall() {
     divider
     echo ""
 
+    # 删除归属标记仅在成功进入并完成卸载流程后
+    rm -f "$INSTALLER_OWNERSHIP_MARKER" 2>/dev/null || true
+    rmdir "$(dirname "$INSTALLER_OWNERSHIP_MARKER")" 2>/dev/null || true
+
     # 删除自身脚本及任何下载的面板脚本残留
     rm -f "$0" 2>/dev/null || true
     rm -f incudal-install.sh *.install.sh install.sh incudal.sh 2>/dev/null || true
@@ -2588,23 +2725,20 @@ main() {
         exit 1
     fi
 
-    # 检测系统环境
-    detect_system
-
     # ---- 解析命令行参数（兼容非交互模式）----
     local ACTION="install"   # 默认动作为安装
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --mode)
-                MODE="$2"; shift 2 ;;
+                require_arg_value "$1" "${2:-}"; MODE="$2"; shift 2 ;;
             --token)
-                TOKEN="$2"; shift 2 ;;
+                require_arg_value "$1" "${2:-}"; TOKEN="$2"; shift 2 ;;
             --ipv6-subnet)
-                IPV6_SUBNET="$2"; shift 2 ;;
+                require_arg_value "$1" "${2:-}"; IPV6_SUBNET="$2"; shift 2 ;;
             --ipv6-iface)
-                IPV6_IFACE="$2"; shift 2 ;;
+                require_arg_value "$1" "${2:-}"; IPV6_IFACE="$2"; shift 2 ;;
             --port|-p)
-                LISTEN_PORT="$2"; shift 2 ;;
+                require_arg_value "$1" "${2:-}"; LISTEN_PORT="$2"; shift 2 ;;
             --uninstall)
                 ACTION="uninstall"; shift ;;
             --agent|--agent-menu)
@@ -2635,11 +2769,14 @@ main() {
         esac
     done
 
-    # 如果通过命令行指定了卸载，直接执行
+    # 如果通过命令行指定了卸载，先检查交互终端与安装归属
     if [[ "$ACTION" == "uninstall" ]]; then
         do_uninstall
         exit 0
     fi
+
+    # 检测系统环境仅在安装流程开始后运行
+    detect_system
     if [[ "$ACTION" == "agent" ]]; then
         manage_incudal_agent
         exit 0
@@ -2647,20 +2784,18 @@ main() {
 
     # ---- 交互式流程 ----
 
-    # 如果 stdin 不是终端且缺少参数，给出提示
-    if [[ ! -t 0 ]]; then
-        if [[ -z "$MODE" || -z "$TOKEN" ]]; then
-            error "通过管道执行时，必须提供 --mode 和 --token 参数"
-            echo -e "  ${DIM}示例: curl -sL <URL> | sudo bash -s -- --mode nat --token <TOKEN>${NC}"
-            exit 1
-        fi
-    fi
-
-    # 合并注入变量与 CLI 参数
+    # 合并注入变量与 CLI 参数；面板注入值明确优先于命令行值
     TOKEN="${INJECT_TOKEN:-${TOKEN:-}}"
     MODE="${INJECT_MODE:-${MODE:-}}"
     IPV6_SUBNET="${INJECT_IPV6_SUBNET:-${IPV6_SUBNET:-}}"
     IPV6_IFACE="${INJECT_IPV6_IFACE:-${IPV6_IFACE:-}}"
+
+    # 如果 stdin 不是终端且缺少有效的安装参数，给出提示
+    if [[ ! -t 0 && ( -z "$MODE" || -z "$TOKEN" ) ]]; then
+        error "通过管道执行时，必须提供 --mode 和 --token 参数"
+        echo -e "  ${DIM}示例: curl --proto '=https' --tlsv1.2 -fsSL <URL> | sudo bash -s -- --mode nat --token <TOKEN>${NC}"
+        exit 1
+    fi
 
     # 模式选择（未通过 CLI 或面板注入指定时进入菜单）
     if [[ -z "$MODE" ]]; then
@@ -2739,18 +2874,21 @@ main() {
     fi
 
     # 端口修改逻辑
-    if [[ -z "${LISTEN_PORT:-}" ]]; then
+    if [[ ! -t 0 && -z "${LISTEN_PORT:-}" ]]; then
+        LISTEN_PORT="8443"
+    elif [[ -z "${LISTEN_PORT:-}" ]]; then
         echo -e "\n${CYAN}==> (可选) 自定义通信端口${NC}"
         echo -e "  ${DIM}默认 8443，若被防火墙屏蔽可改为 10000+ 端口${NC}"
         echo -ne "  ${BOLD}通信端口 [默认 8443]: ${NC}"
         read -r USER_PORT
-        if [[ -n "$USER_PORT" && "$USER_PORT" =~ ^[0-9]+$ ]]; then
-            LISTEN_PORT="$USER_PORT"
-        else
+        if [[ -z "$USER_PORT" ]]; then
             LISTEN_PORT="8443"
+        else
+            LISTEN_PORT="$USER_PORT"
         fi
     fi
 
+    validate_install_inputs
     configure_agent_heartbeat_interval
 
     # WARP 询问逻辑（纯 IPv6 专供）
@@ -2811,6 +2949,7 @@ main() {
     fi
 
     install_incudal_agent
+    mark_installer_ownership
 
     show_result
 }

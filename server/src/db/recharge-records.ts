@@ -5,7 +5,55 @@
 import { prisma } from './prisma.js'
 import type { RechargeRecord, RechargeStatus } from '@prisma/client'
 import { nanoid } from 'nanoid'
+import { getTradeNoForIndex } from '../lib/recharge-reliability.js'
 import { getTodayRange } from '../lib/timezone.js'
+
+export { getTradeNoForIndex } from '../lib/recharge-reliability.js'
+
+export async function isCallbackProcessed(
+  providerId: number,
+  orderNo: string,
+  tradeNo: string | null | undefined
+): Promise<boolean> {
+  // 数据库不可用时必须失败，不能把查询失败当作尚未处理。
+  const existing = await prisma.paymentCallback.findUnique({
+    where: {
+      providerId_orderNo_tradeNo: {
+        providerId,
+        orderNo,
+        tradeNo: getTradeNoForIndex(orderNo, tradeNo)
+      }
+    }
+  })
+  return existing?.processed === true
+}
+
+export async function markCallbackProcessed(
+  providerId: number,
+  orderNo: string,
+  tradeNo: string | null | undefined,
+  ip: string | null
+): Promise<void> {
+  // 原子 upsert 处理并发重复回调，也允许 processed=false 的记录完成处理。
+  // 不捕获异常：连接、表结构等错误必须使 HTTP 请求失败，供支付平台重试。
+  await prisma.paymentCallback.upsert({
+    where: {
+      providerId_orderNo_tradeNo: {
+        providerId,
+        orderNo,
+        tradeNo: getTradeNoForIndex(orderNo, tradeNo)
+      }
+    },
+    create: {
+      providerId,
+      orderNo,
+      tradeNo: getTradeNoForIndex(orderNo, tradeNo),
+      callbackIp: ip,
+      processed: true
+    },
+    update: { processed: true }
+  })
+}
 
 // ==================== 类型定义 ====================
 
@@ -332,6 +380,8 @@ export async function completeRecharge(
         balanceBefore: Number(user!.balance) - actualAmount,
         balanceAfter: Number(user!.balance),
         orderId: record.orderNo,
+        // 与余额增加、订单完成同一事务。即使订单状态被重置，也不能再次入账。
+        idempotencyKey: `recharge:${record.orderNo}`,
         remark: `充值：${Number(record.amount)} 元`
       }
     })

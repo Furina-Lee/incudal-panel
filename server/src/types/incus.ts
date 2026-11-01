@@ -18,6 +18,31 @@ export interface IncusApiResponse<T = unknown> {
   err?: string
 }
 
+export interface IncusServerInfo {
+  api_version: string
+  api_status?: string
+  api_extensions: string[]
+  auth: string
+  auth_methods: string[]
+  config?: Record<string, unknown>
+  environment?: {
+    addresses: string[]
+    architectures: string[]
+    certificate: string
+    driver: string
+    driver_version: string
+    kernel: string
+    kernel_architecture: string
+    kernel_version: string
+    server: string
+    server_name?: string
+    server_pid: number
+    server_version: string
+    storage: string
+    storage_version: string
+  }
+}
+
 export interface IncusOperation {
   id: string
   class: string
@@ -112,28 +137,6 @@ export interface IncusStoragePool {
   description?: string
   used_by?: string[]
   config?: Record<string, string>
-}
-
-export interface IncusServerInfo {
-  api_version: string
-  auth: string
-  auth_methods: string[]
-  config?: Record<string, unknown>
-  environment?: {
-    addresses: string[]
-    architectures: string[]
-    certificate: string
-    driver: string
-    driver_version: string
-    kernel: string
-    kernel_architecture: string
-    kernel_version: string
-    server: string
-    server_pid: number
-    server_version: string
-    storage: string
-    storage_version: string
-  }
 }
 
 export interface IncusResources {

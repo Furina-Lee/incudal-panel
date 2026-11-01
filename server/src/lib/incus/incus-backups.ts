@@ -9,7 +9,7 @@ import type { IncusBackup, CreateBackupOptions } from '../../types/incus.js'
  * 获取实例的备份列表
  */
 export async function listBackups(client: IncusClient, instanceName: string): Promise<IncusBackup[]> {
-  return client.request<IncusBackup[]>('GET', `/1.0/instances/${instanceName}/backups`)
+  return client.request<IncusBackup[]>('GET', `/1.0/instances/${encodeURIComponent(instanceName)}/backups`)
 }
 
 /**
@@ -22,7 +22,7 @@ export async function getBackup(
 ): Promise<IncusBackup> {
   return client.request<IncusBackup>(
     'GET',
-    `/1.0/instances/${instanceName}/backups/${backupName}`
+    `/1.0/instances/${encodeURIComponent(instanceName)}/backups/${backupName}`
   )
 }
 
@@ -35,7 +35,7 @@ export async function createBackup(
   backupName: string,
   options: CreateBackupOptions = {}
 ): Promise<unknown> {
-  return client.request('POST', `/1.0/instances/${instanceName}/backups`, {
+  return client.request('POST', `/1.0/instances/${encodeURIComponent(instanceName)}/backups`, {
     name: backupName,
     instance_only: options.instanceOnly !== false, // 默认不包含快照
     optimized_storage: options.optimizedStorage !== false, // 默认优化存储
@@ -51,7 +51,7 @@ export async function deleteBackup(
   instanceName: string,
   backupName: string
 ): Promise<unknown> {
-  return client.request('DELETE', `/1.0/instances/${instanceName}/backups/${backupName}`)
+  return client.request('DELETE', `/1.0/instances/${encodeURIComponent(instanceName)}/backups/${backupName}`)
 }
 
 /**
@@ -63,7 +63,7 @@ export function getBackupExportUrl(
   instanceName: string,
   backupName: string
 ): string {
-  return `${client.baseUrl}/1.0/instances/${instanceName}/backups/${backupName}/export`
+  return `${client.baseUrl}/1.0/instances/${encodeURIComponent(instanceName)}/backups/${backupName}/export`
 }
 
 /**
@@ -82,7 +82,7 @@ export async function getBackupExportStream(
 
   const { Agent, request } = await import('undici')
   const { readFileSync } = await import('fs')
-  const url = `${client.baseUrl}/1.0/instances/${instanceName}/backups/${backupName}/export`
+  const url = `${client.baseUrl}/1.0/instances/${encodeURIComponent(instanceName)}/backups/${backupName}/export`
 
   // 为大文件传输创建专用 Agent，设置更长的超时
   // 连接超时 60 秒，无 body 超时（流式传输）

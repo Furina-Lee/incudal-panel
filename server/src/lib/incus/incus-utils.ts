@@ -10,26 +10,42 @@ import type { IncusApiResponse, IncusOperation } from '../../types/incus.js'
  * 等待异步操作完成
  * @param timeout 超时时间（毫秒），默认 120 秒
  */
+export function normalizeOperationUrl(operationUrl: string): string {
+  const parsed = new URL(operationUrl, 'http://incus')
+  if (!parsed.pathname.startsWith('/1.0/operations/')) {
+    throw new Error(`Invalid Incus operation URL: ${operationUrl}`)
+  }
+  return parsed.pathname
+}
+
 export async function waitForOperation(
   client: IncusClient,
   operationUrl: string,
-  timeout: number = 300000 // 从 120000 放宽到 300000 (5分钟)
+  timeout: number = 300000
 ): Promise<unknown> {
   const startTime = Date.now()
+  const path = normalizeOperationUrl(operationUrl)
 
   while (Date.now() - startTime < timeout) {
-    const op = await client.request<IncusOperation>('GET', `${operationUrl}/wait?timeout=10`)
+    const remainingSeconds = Math.max(1, Math.ceil((timeout - (Date.now() - startTime)) / 1000))
+    const op = await client.request<IncusOperation>(
+      'GET', `${path.replace(/\/$/, '')}/wait?timeout=${Math.min(10, remainingSeconds)}`, null,
+      Math.min(120000, Math.max(1000, (remainingSeconds + 2) * 1000))
+    )
 
-    if (op.status === 'Success') {
+    if (op.status === 'Success' || op.status_code === 200) {
       return op.metadata
     }
 
-    if (op.status === 'Failure') {
-      throw new Error(op.err || op.error || '操作失败')
+    if (op.status === 'Failure' || (typeof op.status_code === 'number' && op.status_code >= 400)) {
+      throw new Error(op.err || op.error || 'Incus operation failed')
+    }
+    if (['Cancelled', 'Canceled'].includes(op.status || '')) {
+      throw new Error(op.err || op.error || 'Incus operation was cancelled')
     }
   }
 
-  throw new Error('Operation timeout (5 minutes)')
+  throw new Error(`Incus operation timeout (${Math.ceil(timeout / 1000)} seconds)`)
 }
 
 /**
@@ -48,13 +64,17 @@ export async function waitForOperationLong(
     if (waitTimeout <= 0) break
 
     try {
-      // Use /wait endpoint for long polling
-      const waitUrl = `${client.baseUrl}${operationUrl}/wait?timeout=${waitTimeout}`
+      // Use the normalized /wait endpoint for long polling. Incus may return
+      // either an absolute or relative operation URL.
+      const operationPath = normalizeOperationUrl(operationUrl)
+      const waitUrl = new URL(`${operationPath.replace(/\/$/, '')}/wait?timeout=${waitTimeout}`, `${client.baseUrl}/`).toString()
 
       const response = await request(waitUrl, {
         method: 'GET',
         dispatcher: client.agent!,
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        headersTimeout: Math.min(120000, Math.max(1000, (waitTimeout + 2) * 1000)),
+        bodyTimeout: Math.min(120000, Math.max(1000, (waitTimeout + 2) * 1000))
       })
 
       const text = await response.body.text()

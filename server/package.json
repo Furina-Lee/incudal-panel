@@ -23,6 +23,10 @@
     "test:agent-auth": "tsx scripts/test-agent-auth.ts",
     "test:security-config": "tsx scripts/test-security-config.ts",
     "test:api": "tsx scripts/test-api.ts",
+    "test:recharge-reliability": "node --import tsx scripts/test-recharge-reliability.ts",
+    "test:incus-compatibility": "node --import tsx scripts/test-incus-compatibility.ts",
+    "test:maintenance-lifecycle": "node --import tsx scripts/test-maintenance-lifecycle.ts",
+    "test:installer-safety": "node --import tsx scripts/test-installer-safety.ts",
     "analyze:queries": "tsx scripts/analyze-queries.ts"
   },
   "dependencies": {

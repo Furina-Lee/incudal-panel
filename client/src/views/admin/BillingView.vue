@@ -602,8 +602,9 @@ async function syncRechargeRecord(record: any) {
       // 并行刷新充值记录和概览
       await Promise.all([loadRechargeRecords(), loadOverview()])
     } else {
-      toast.info(res.message)
+      toast.info(res.reviewRequired ? t('admin.billing.reconciliationReview') : res.message)
     }
+    await loadRechargeRecords()
   } catch (err: any) {
     toast.error(err.message)
   } finally {
@@ -1925,7 +1926,7 @@ function copyToClipboard(text: string) {
 
             <div class="flex justify-end">
               <button
-                v-if="rec.status === 'pending'"
+                v-if="rec.status === 'pending' || rec.status === 'paid'"
                 class="btn btn-sm btn-ghost text-blue-500"
                 :disabled="syncingRecordId === rec.id"
                 @click="syncRechargeRecord(rec)"
@@ -1990,7 +1991,7 @@ function copyToClipboard(text: string) {
                 <td class="p-3 text-themed-muted whitespace-nowrap">{{ formatDate(rec.createdAt) }}</td>
                 <td class="p-3 whitespace-nowrap">
                   <button
-                    v-if="rec.status === 'pending'"
+                    v-if="rec.status === 'pending' || rec.status === 'paid'"
                     class="btn btn-sm btn-ghost text-blue-500"
                     :disabled="syncingRecordId === rec.id"
                     @click="syncRechargeRecord(rec)"

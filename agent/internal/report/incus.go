@@ -31,6 +31,16 @@ type incusAPIResponse struct {
 	Metadata json.RawMessage `json:"metadata"`
 }
 
+type incusServerInfo struct {
+	APIVersion    string               `json:"api_version"`
+	APIExtensions []string             `json:"api_extensions"`
+	Environment   incusServerEnvironment `json:"environment"`
+}
+
+type incusServerEnvironment struct {
+	ServerVersion string `json:"server_version"`
+}
+
 type incusInstanceSummary struct {
 	Name       string `json:"name"`
 	Status     string `json:"status"`
@@ -79,6 +89,17 @@ func collectIncusInstanceReport() map[string]any {
 
 	// 只通过本机 Unix socket 做只读采集，不要求宿主机开放额外 Agent 端口。
 	client := newIncusUnixHTTPClient(socketPath)
+	serverInfo, err := getIncusServerInfo(client)
+	if err != nil {
+		return map[string]any{
+			"available":  false,
+			"reportedAt": reportedAt,
+			"total":      0,
+			"items":      []any{},
+			"error":      truncateReportError(err),
+		}
+	}
+
 	instances, err := listIncusInstances(client)
 	if err != nil {
 		return map[string]any{
@@ -119,11 +140,14 @@ func collectIncusInstanceReport() map[string]any {
 	}
 
 	return map[string]any{
-		"available":  true,
-		"reportedAt": reportedAt,
-		"total":      len(instances),
-		"truncated":  len(instances) > len(limitedInstances),
-		"items":      normalizedItems,
+		"available":     true,
+		"reportedAt":    reportedAt,
+		"apiVersion":    serverInfo.APIVersion,
+		"serverVersion": serverInfo.Environment.ServerVersion,
+		"apiExtensions": serverInfo.APIExtensions,
+		"total":         len(instances),
+		"truncated":     len(instances) > len(limitedInstances),
+		"items":         normalizedItems,
 	}
 }
 
@@ -141,6 +165,10 @@ func newIncusUnixHTTPClient(socketPath string) *http.Client {
 		Transport: transport,
 		Timeout:   8 * time.Second,
 	}
+}
+
+func getIncusServerInfo(client *http.Client) (incusServerInfo, error) {
+	return incusRequest[incusServerInfo](client, "/1.0")
 }
 
 func listIncusInstances(client *http.Client) ([]incusInstanceSummary, error) {

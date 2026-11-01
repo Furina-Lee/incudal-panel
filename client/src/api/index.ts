@@ -78,7 +78,8 @@ import type {
   TelegramWebhookInfoResponse,
   TelegramWebhookSetupResponse,
   UserInvite,
-  UserInviteSummary
+  UserInviteSummary,
+  StatusMaintenance
 } from '@/types/api.js'
 
 export type VipRuleType = 'user' | 'hosting'
@@ -2603,6 +2604,26 @@ const api = {
   },
 
   // 公告/通知历史
+  status: {
+    get: (): Promise<{
+      components: Array<{ id: number; name: string; description: string | null; sortOrder: number; isOperational: boolean }>
+      incidents: Array<{ id: number; title: string; status: string; impact: string; body: string; startedAt: string; resolvedAt: string | null; createdAt: string; updatedAt: string; updates: Array<{ id: number; status: string; body: string; createdAt: string }> }>
+      maintenances: StatusMaintenance[]
+    }> => http.get('/status'),
+    adminList: (): Promise<{ components: any[]; incidents: any[]; maintenances: StatusMaintenance[] }> => http.get('/status/admin/status'),
+    createComponent: (data: { name: string; description?: string; sortOrder?: number; isOperational?: boolean }) => http.post('/status/admin/status/components', data),
+    updateComponent: (id: number, data: { name?: string; description?: string | null; sortOrder?: number; isOperational?: boolean }) => http.patch(`/status/admin/status/components/${id}`, data),
+    deleteComponent: (id: number) => http.delete(`/status/admin/status/components/${id}`),
+    createIncident: (data: { title: string; status: string; impact: string; body: string }) => http.post('/status/admin/status/incidents', data),
+    updateIncident: (id: number, data: { title?: string; status?: string; impact?: string; body?: string }) => http.patch(`/status/admin/status/incidents/${id}`, data),
+    deleteIncident: (id: number) => http.delete(`/status/admin/status/incidents/${id}`),
+    createMaintenance: (data: { title: string; body: string; impact: string; scheduledStart: string; scheduledEnd: string }) => http.post<StatusMaintenance>('/status/admin/status/maintenances', data),
+    updateMaintenance: (id: number, data: Partial<{ title: string; body: string; impact: string; scheduledStart: string; scheduledEnd: string; status: string; update: string }>) => http.patch<StatusMaintenance>(`/status/admin/status/maintenances/${id}`, data),
+    addMaintenanceUpdate: (id: number, body: string) => http.post(`/status/admin/status/maintenances/${id}/updates`, { body }),
+    cancelMaintenance: (id: number) => http.post<StatusMaintenance>(`/status/admin/status/maintenances/${id}/cancel`),
+    deleteMaintenance: (id: number) => http.delete(`/status/admin/status/maintenances/${id}`)
+  },
+
   announcements: {
     // 获取公告历史列表（管理员）
     list: (params?: { page?: number; pageSize?: number; type?: string }): Promise<{
@@ -3898,6 +3919,7 @@ const api = {
       success: boolean
       synced: boolean
       status: string
+      reviewRequired?: boolean
       message: string
     }> => http.post(`/admin/billing/recharge-records/${id}/sync`),
 

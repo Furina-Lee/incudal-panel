@@ -27,7 +27,7 @@ import {
   resolveRechargeProviderConfigSnapshot
 } from '../lib/recharge-provider-snapshot.js'
 import { createLog } from '../db/logs.js'
-import { prisma } from '../db/prisma.js'
+import { getTradeNoForIndex, isCallbackProcessed, markCallbackProcessed } from '../db/recharge-records.js'
 import { createInboxMessage } from '../db/inbox.js'
 import { sendRechargeSuccessEmail } from '../lib/mailer.js'
 
@@ -42,58 +42,6 @@ function isRechargeProviderTypeSupported(type: string): boolean {
 
 function getUnsupportedProviderError(type: string): string {
   return `支付渠道类型 ${type} 当前未实现安全的充值流程，暂不支持启用`
-}
-
-/**
- * 检查回调是否已处理（数据库持久化防重放）
- * 注意：tradeNo 参数应该是已经处理过的版本（通过 getTradeNoForIndex 处理）
- */
-async function isCallbackProcessed(providerId: number, orderNo: string, tradeNo: string): Promise<boolean> {
-  try {
-    const existing = await prisma.paymentCallback.findUnique({
-      where: {
-        providerId_orderNo_tradeNo: {
-          providerId,
-          orderNo,
-          tradeNo
-        }
-      }
-    })
-    return !!existing
-  } catch {
-    return false
-  }
-}
-
-/**
- * 生成唯一的 tradeNo 标识（用于联合索引）
- * 当 tradeNo 为空时，生成基于 orderNo 的唯一标识，避免空字符串导致联合索引冲突
- */
-function getTradeNoForIndex(orderNo: string, tradeNo: string | null | undefined): string {
-  if (tradeNo && tradeNo.trim()) {
-    return tradeNo.trim()
-  }
-  // 使用 orderNo + 时间戳生成唯一标识，确保不同回调不会冲突
-  return `__NO_TRADE_NO__${orderNo}__${Date.now()}`
-}
-
-/**
- * 记录回调已处理（数据库持久化防重放）
- */
-async function markCallbackProcessed(providerId: number, orderNo: string, tradeNo: string | null, ip: string | null): Promise<void> {
-  try {
-    await prisma.paymentCallback.create({
-      data: {
-        providerId,
-        orderNo,
-        tradeNo: getTradeNoForIndex(orderNo, tradeNo),
-        callbackIp: ip,
-        processed: true
-      }
-    })
-  } catch {
-    // 忽略唯一索引冲突（并发情况）
-  }
 }
 
 function normalizeCallbackIp(ip: string | null | undefined): string {

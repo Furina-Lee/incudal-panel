@@ -7,6 +7,7 @@ import api from '@/api'
 
 const { t } = useI18n()
 const themeStore = useThemeStore()
+const isDarkTheme = computed(() => themeStore.isDark)
 const toast = useToast()
 
 interface Props {
@@ -577,10 +578,10 @@ function normalizeStorageLimit(value: string): string | null {
                 </div>
 
                 <!-- 容器权限 (已隐藏) -->
-                <div v-if="false" class="border rounded-lg" :class="themeStore.isDark ? 'border-gray-700' : 'border-gray-200'">
-                  <button 
+                <div v-if="false" class="border rounded-lg" :class="isDarkTheme ? 'border-gray-700' : 'border-gray-200'">
+                  <button
                     class="w-full flex items-center justify-between px-4 py-3 text-left"
-                    :class="themeStore.isDark ? 'hover:bg-gray-800' : 'hover:bg-gray-50'"
+                    :class="isDarkTheme ? 'hover:bg-gray-800' : 'hover:bg-gray-50'"
                     @click="toggleSection('permissions')"
                   >
                     <span class="font-medium text-themed">{{ t('host.batchConfig.section.permissions') }}</span>

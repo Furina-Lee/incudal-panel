@@ -23,6 +23,7 @@ import {
   mergeHeleketPaymentDetails
 } from '../lib/recharge-payment-details.js'
 import { resolveRechargeProviderConfigSnapshot } from '../lib/recharge-provider-snapshot.js'
+import { getTradeNoForIndex } from '../lib/recharge-reliability.js'
 import { createInboxMessage } from '../db/inbox.js'
 import { getTodayRange, getThisMonthStart, getLastMonthRange } from '../lib/timezone.js'
 import { validateName, encryptSensitiveData } from '../lib/security.js'
@@ -118,16 +119,6 @@ function buildEpayConfig(config: Record<string, unknown>): { epayConfig: EpayCon
 
     return { epayConfig: v2Config, valid: true }
   }
-}
-
-/**
- * 生成唯一的 tradeNo 标识（用于联合索引）
- */
-function getTradeNoForIndex(orderNo: string, tradeNo: string | null | undefined): string {
-  if (tradeNo && tradeNo.trim()) {
-    return tradeNo.trim()
-  }
-  return `__NO_TRADE_NO__${orderNo}__${Date.now()}`
 }
 
 function resolveRechargeProviderConfig(

@@ -47,7 +47,7 @@ function isOperationRunning(operation: IncusOperation): boolean {
 }
 
 function operationTouchesInstance(resources: unknown, instanceName: string): boolean {
-  const instancePath = `/1.0/instances/${instanceName}`
+  const instancePath = `/1.0/instances/${encodeURIComponent(instanceName)}`
 
   if (typeof resources === 'string') {
     return resources === instancePath || resources.startsWith(instancePath)
@@ -83,9 +83,14 @@ function describeOperations(operations: IncusOperation[]): string {
 
 function getOperationPath(operation: IncusOperation): string | null {
   if (!operation.id) return null
-  return operation.id.startsWith('/1.0/operations/')
-    ? operation.id
-    : `/1.0/operations/${operation.id}`
+  if (operation.id.startsWith('/1.0/operations/')) return operation.id
+  try {
+    const parsed = new URL(operation.id, 'http://incus')
+    if (parsed.pathname.startsWith('/1.0/operations/')) return parsed.pathname
+  } catch {
+    // Fall through to treating the ID as a raw operation identifier.
+  }
+  return `/1.0/operations/${encodeURIComponent(operation.id)}`
 }
 
 function operationAgeMs(operation: IncusOperation): number {
@@ -241,14 +246,14 @@ export async function listInstances(client: IncusClient): Promise<IncusInstance[
  * 获取实例详情
  */
 export async function getInstance(client: IncusClient, name: string): Promise<IncusInstance> {
-  return client.request<IncusInstance>('GET', `/1.0/instances/${name}`)
+  return client.request<IncusInstance>('GET', `/1.0/instances/${encodeURIComponent(name)}`)
 }
 
 /**
  * 获取实例状态
  */
 export async function getInstanceState(client: IncusClient, name: string): Promise<unknown> {
-  return client.request('GET', `/1.0/instances/${name}/state`)
+  return client.request('GET', `/1.0/instances/${encodeURIComponent(name)}/state`)
 }
 
 /**
@@ -262,14 +267,14 @@ export async function createInstance(client: IncusClient, config: unknown): Prom
  * 删除实例
  */
 export async function deleteInstance(client: IncusClient, name: string): Promise<unknown> {
-  return client.request('DELETE', `/1.0/instances/${name}`)
+  return client.request('DELETE', `/1.0/instances/${encodeURIComponent(name)}`)
 }
 
 /**
  * 启动实例
  */
 export async function startInstance(client: IncusClient, name: string): Promise<unknown> {
-  return client.request('PUT', `/1.0/instances/${name}/state`, {
+  return client.request('PUT', `/1.0/instances/${encodeURIComponent(name)}/state`, {
     action: 'start',
     timeout: 60  // 60秒
   })
@@ -294,7 +299,7 @@ export async function stopInstance(
       return currentState
     }
 
-    return client.request('PUT', `/1.0/instances/${name}/state`, {
+    return client.request('PUT', `/1.0/instances/${encodeURIComponent(name)}/state`, {
       action: 'stop',
       timeout: 60,
       force
@@ -308,7 +313,7 @@ export async function stopInstance(
  * 重启实例
  */
 export async function restartInstance(client: IncusClient, name: string, force: boolean = false): Promise<unknown> {
-  return client.request('PUT', `/1.0/instances/${name}/state`, {
+  return client.request('PUT', `/1.0/instances/${encodeURIComponent(name)}/state`, {
     action: 'restart',
     timeout: 60,  // 60秒
     force
@@ -319,7 +324,7 @@ export async function restartInstance(client: IncusClient, name: string, force: 
  * 冻结实例
  */
 export async function freezeInstance(client: IncusClient, name: string): Promise<unknown> {
-  return client.request('PUT', `/1.0/instances/${name}/state`, {
+  return client.request('PUT', `/1.0/instances/${encodeURIComponent(name)}/state`, {
     action: 'freeze',
     timeout: 60
   })
@@ -329,7 +334,7 @@ export async function freezeInstance(client: IncusClient, name: string): Promise
  * 解冻实例
  */
 export async function unfreezeInstance(client: IncusClient, name: string): Promise<unknown> {
-  return client.request('PUT', `/1.0/instances/${name}/state`, {
+  return client.request('PUT', `/1.0/instances/${encodeURIComponent(name)}/state`, {
     action: 'unfreeze',
     timeout: 30
   })
@@ -374,7 +379,7 @@ export async function rebuildInstance(
 
   // rebuild 是耗时操作，使用 5 分钟超时
   return runInstanceActionWithBusyRetry(client, name, 'rebuild the instance', () =>
-    client.request('POST', `/1.0/instances/${name}/rebuild`, payload, 300000),
+    client.request('POST', `/1.0/instances/${encodeURIComponent(name)}/rebuild`, payload, 300000),
     options
   )
 }
@@ -398,7 +403,7 @@ export async function updateInstance(client: IncusClient, name: string, updates:
       }
     }
 
-    return client.request('PUT', `/1.0/instances/${name}`, {
+    return client.request('PUT', `/1.0/instances/${encodeURIComponent(name)}`, {
       ...current,
       ...sanitizedUpdates
     })
@@ -451,7 +456,7 @@ export async function patchInstanceResources(
   }
 
   // 使用 PATCH 进行增量更新
-  return client.request('PATCH', `/1.0/instances/${name}`, patchData)
+  return client.request('PATCH', `/1.0/instances/${encodeURIComponent(name)}`, patchData)
 }
 
 /**
@@ -522,7 +527,7 @@ export async function updateInstanceIpv6Addresses(
   }
 
   // 使用 PATCH 进行原子更新
-  const result = await client.request('PATCH', `/1.0/instances/${instanceName}`, patchData)
+  const result = await client.request('PATCH', `/1.0/instances/${encodeURIComponent(instanceName)}`, patchData)
 
   // 如果实例正在运行且需要重启，则重启容器以生效
   // 注意：如果实例是停止状态，更新配置后不需要重启（下次启动时会自动应用）
@@ -550,7 +555,7 @@ export async function addDevice(
   const instance = await getInstance(client, instanceName)
   const devices = instance.devices || {}
   devices[deviceName] = device
-  return client.request('PUT', `/1.0/instances/${instanceName}`, {
+  return client.request('PUT', `/1.0/instances/${encodeURIComponent(instanceName)}`, {
     ...instance,
     devices
   })
@@ -568,7 +573,7 @@ export async function removeDevice(
   if (instance.devices && instance.devices[deviceName]) {
     const devices = { ...instance.devices }
     delete devices[deviceName]
-    return client.request('PUT', `/1.0/instances/${instanceName}`, {
+    return client.request('PUT', `/1.0/instances/${encodeURIComponent(instanceName)}`, {
       ...instance,
       devices
     })
@@ -884,7 +889,7 @@ export async function exec(
   options: Record<string, unknown> = {},
   timeout: number = 120000
 ): Promise<unknown> {
-  return client.request('POST', `/1.0/instances/${instanceName}/exec`, {
+  return client.request('POST', `/1.0/instances/${encodeURIComponent(instanceName)}/exec`, {
     command: Array.isArray(command) ? command : ['/bin/sh', '-c', command],
     'wait-for-websocket': false,
     interactive: false,
@@ -934,7 +939,7 @@ export async function execWithOutput(
  */
 export function getConsoleWebSocketUrl(client: IncusClient, instanceName: string): string {
   const wsUrl = client.baseUrl.replace('https://', 'wss://').replace('http://', 'ws://')
-  return `${wsUrl}/1.0/instances/${instanceName}/console?wait-for-websocket=true`
+  return `${wsUrl}/1.0/instances/${encodeURIComponent(instanceName)}/console?wait-for-websocket=true`
 }
 
 /**

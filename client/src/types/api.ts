@@ -7,6 +7,31 @@ export interface VipBadgeStyle {
   textColor: string
 }
 
+export type MaintenanceStatus = 'scheduled' | 'active' | 'completed' | 'cancelled'
+
+export interface StatusMaintenanceUpdate {
+  id: number
+  maintenanceId: number
+  body: string
+  createdAt: string
+}
+
+export interface StatusMaintenance {
+  id: number
+  title: string
+  body: string
+  impact: 'none' | 'minor' | 'major' | 'critical' | string
+  status: MaintenanceStatus
+  scheduledStart: string
+  scheduledEnd: string
+  startedAt: string | null
+  completedAt: string | null
+  cancelledAt: string | null
+  createdAt: string
+  updatedAt: string
+  updates: StatusMaintenanceUpdate[]
+}
+
 // ==================== 认证相关 ====================
 
 export interface LoginRequest {
@@ -742,6 +767,10 @@ export interface HostAgentStatus {
     incus?: {
       available?: boolean
       socket?: string
+      apiVersion?: string
+      serverVersion?: string
+      apiExtensions?: string[]
+      error?: string
     }
     resources?: {
       cpuTotal?: number

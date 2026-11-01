@@ -431,7 +431,8 @@ function injectInstallVariable(script: string, name: string, value: string): str
 }
 
 function buildHostInstallCommand(panelUrl: string, installToken: string): string {
-  return `curl -sL ${panelUrl}/api/hosts/install.sh/${installToken} -o incudal.sh && sudo bash incudal.sh`
+  const scriptUrl = `${panelUrl.replace(/\/$/, '')}/api/hosts/install.sh/${installToken}`
+  return `curl --proto '=https' --tlsv1.2 -fsSL ${shellDoubleQuote(scriptUrl)} -o incudal.sh && sudo bash ./incudal.sh`
 }
 
 export default async function hostRoutes(fastify: FastifyInstance) {
@@ -1561,6 +1562,7 @@ export default async function hostRoutes(fastify: FastifyInstance) {
         api_version?: string
         environment?: {
           server_name?: string
+          server_version?: string
           kernel_architecture?: string
           architectures?: string[]
         }
@@ -1570,6 +1572,7 @@ export default async function hostRoutes(fastify: FastifyInstance) {
         serverInfo.environment?.kernel_architecture ||
         serverInfo.environment?.architectures?.[0]
       )
+      const compatibility = client.compatibility
 
       await db.updateHostResources(hostId, {
         architecture: hostArchitecture
@@ -1582,8 +1585,10 @@ export default async function hostRoutes(fastify: FastifyInstance) {
         message: 'Connection successful',
         serverInfo: {
           apiVersion: serverInfo.api_version,
+          serverVersion: serverInfo.environment?.server_version,
           environment: serverInfo.environment?.server_name,
-          architecture: hostArchitecture
+          architecture: hostArchitecture,
+          compatibility
         }
       }
     } catch (error) {

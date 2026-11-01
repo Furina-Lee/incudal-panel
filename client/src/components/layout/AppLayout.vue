@@ -104,7 +104,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="h-screen flex overflow-hidden" :class="themeStore.isDark ? 'bg-[#0a0a0a]' : 'bg-gray-50'">
+  <div class="operator-shell h-screen flex overflow-hidden" :class="themeStore.isDark ? 'bg-[#0a0a0a]' : 'bg-gray-50'">
     <!-- 侧边导航 -->
     <SideNav 
       :collapsed="sidebarCollapsed" 
@@ -115,7 +115,7 @@ onUnmounted(() => {
     <!-- 主内容区 -->
     <div class="flex-1 flex flex-col min-w-0 h-full">
       <!-- 顶部栏 -->
-      <header class="h-14 flex items-center justify-between px-4 md:px-6 border-b" :class="themeStore.isDark ? 'border-gray-800' : 'border-gray-200 bg-white'">
+      <header class="operator-topbar h-14 flex items-center justify-between px-4 md:px-6 border-b" :class="themeStore.isDark ? 'border-gray-800' : 'border-gray-200 bg-white'">
         <div class="flex items-center gap-2 md:gap-4">
           <!-- Mobile: Hamburger menu -->
           <button 
@@ -338,7 +338,7 @@ onUnmounted(() => {
       </header>
 
       <!-- 页面内容 -->
-      <main class="flex-1 p-4 md:p-6 xl:px-14 2xl:px-24" :class="isSplitPane ? 'overflow-auto lg:overflow-hidden' : 'overflow-auto'">
+      <main class="operator-main flex-1 p-4 md:p-6 xl:px-14 2xl:px-24" :class="isSplitPane ? 'overflow-auto lg:overflow-hidden' : 'overflow-auto'">
         <div class="w-full mx-auto" :class="isSplitPane ? 'lg:h-full' : ''">
           <slot />
         </div>

@@ -197,6 +197,23 @@ const agentStatusInfo = computed(() => {
 })
 
 const agentReport = computed(() => agentStatus.value?.lastReport ?? {})
+const incusReport = computed(() => agentReport.value.incus ?? {})
+const incusVersionStatus = computed(() => {
+  if (!incusReport.value.available || !incusReport.value.serverVersion) return 'unknown'
+  const parts = incusReport.value.serverVersion.split('.').map(Number)
+  const target = [7, 6, 0]
+  if (parts.length < 2 || parts.some(part => !Number.isFinite(part))) return 'unknown'
+  for (let index = 0; index < target.length; index += 1) {
+    const current = parts[index] || 0
+    if (current !== target[index]) return current > target[index] ? 'compatible' : 'older'
+  }
+  return 'compatible'
+})
+const incusVersionLabel = computed(() => {
+  if (incusVersionStatus.value === 'compatible') return t('admin.hosts.incusCompatibilityReady')
+  if (incusVersionStatus.value === 'older') return t('admin.hosts.incusCompatibilityOlder')
+  return t('admin.hosts.incusCompatibilityUnknown')
+})
 const hostResources = computed(() => agentReport.value.resources ?? {})
 const hostMetrics = computed(() => agentReport.value.metrics ?? {})
 const agentHeartbeatIntervalSeconds = computed(() => {
@@ -801,6 +818,15 @@ const xAxisLabels = computed(() => {
           <p>
             {{ t('admin.hosts.agentLastSeen') }}:
             <span :class="themeStore.isDark ? 'text-gray-400' : 'text-gray-600'">{{ formatDate(agentStatus.lastSeenAt || undefined) }}</span>
+          </p>
+          <p>
+            {{ t('admin.hosts.incusVersionLabel') }}:
+            <span :class="themeStore.isDark ? 'text-gray-400' : 'text-gray-600'">{{ incusReport.serverVersion || '-' }}</span>
+            <span class="ml-1" :class="incusVersionStatus === 'compatible' ? 'text-emerald-500' : incusVersionStatus === 'older' ? 'text-amber-500' : 'text-gray-500'">{{ incusVersionLabel }}</span>
+          </p>
+          <p v-if="incusReport.apiVersion">
+            {{ t('admin.hosts.incusApiLabel') }}:
+            <span class="font-mono" :class="themeStore.isDark ? 'text-gray-400' : 'text-gray-600'">{{ incusReport.apiVersion }}</span>
           </p>
           <p>
             {{ t('admin.hosts.agentHeartbeatIp') }}:

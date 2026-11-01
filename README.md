@@ -17,6 +17,14 @@ Incudal 基于 Incus 的 NAT VPS 销售与管理面板。
 - 计费与权益：支持余额、充值、消费记录、托管收益、支付渠道、积分、VIP 等级和会员福利。
 - 节点与扩展：通过宿主机 Agent 上报资源与状态，并支持托管节点、反代建站、邮箱服务等扩展能力。
 
+### Incus 兼容性
+
+新节点安装脚本目标版本为 Incus 7.6.0：从 Zabbly APT 源查询对应发行包，精确安装并设置 APT 版本优先级；若仓库没有目标版本，脚本会停止，不会回退安装其他版本。脚本只对新节点安装；检测到已有运行中非 7.6.0 服务或未运行的旧 Incus 软件包时会拒绝自动替换，避免破坏现有实例。
+
+面板和 Agent 按 Incus 7.6.0 的 `/1.0` API 进行兼容性适配。连接宿主机时会读取 `api_version`、`server_version` 和 API 扩展，并在宿主机状态页显示版本提示；这不是实机兼容性认证，也不会升级既有宿主机或 Linux 内核。升级既有节点前请在测试节点验证实例创建、启动/停止、快照、备份导出/恢复、VM 网络、NAT/IPv6 路由和流量计数，再制定单独的维护与回滚方案。可运行 `pnpm --filter server test:incus-compatibility` 检查版本判断逻辑。
+
+安装脚本的非交互模式必须显式提供有效的 `--mode` 和 Token；端口必须为 `1..65535`，IPv6 子网和接口名会校验。安装完成后脚本写入 `/etc/incudal/installer-owned` 归属标记，其中包含稳定的 `ownership=incudal` 哨兵和目标 Incus 版本。`--uninstall` 仅允许从交互终端运行，并要求归属标记、先输入 `BACKUP` 确认已备份，再完成两次卸载确认；缺少有效标记时脚本会拒绝删除，避免误操作非 Incudal 节点。归属检查不绑定脚本补丁版本，因此更新后的安装脚本仍可卸载既有 Incudal 节点。安装命令使用 HTTPS、TLS 1.2 和失败即止的 curl 参数。可运行 `pnpm --filter server test:installer-safety` 执行不依赖 shell 的静态安全检查。
+
 ## 目录结构
 
 ```text
@@ -31,6 +39,10 @@ scripts/                本地开发和检查脚本
 
 ## 搭建教程
 
+本文档中的仓库地址以 `ashvvvvv/incudal-` 为例；如果你使用自己的 Fork，请同步替换 GitHub 地址和 GHCR 镜像名。
+
+本项目使用 PostgreSQL 作为数据库。
+
 当前无论使用哪种部署方式，都需要在 `server/certs` 目录下生成或放置证书与密钥，并确保 Docker 容器具有读取权限。
 
 ### 方式一：Docker Compose 开发环境
@@ -38,7 +50,7 @@ scripts/                本地开发和检查脚本
 适合本地试跑和开发预览。该方式会自动启动 Node、PostgreSQL 和 Redis，并自动安装依赖、执行数据库迁移。
 
 ```bash
-git clone https://github.com/qwer-xyz/incudal.git
+git clone https://github.com/ashvvvvv/incudal-.git
 cd incudal
 docker compose -f docker-compose.dev.yml up
 ```
@@ -62,35 +74,62 @@ docker compose -f docker-compose.dev.yml down
 docker compose -f docker-compose.dev.yml down -v
 ```
 
-### 方式二：生产镜像部署
+### 方式二：生产 Docker Compose 一键部署
 
-生产环境建议准备独立 PostgreSQL 和 Redis，然后构建并运行镜像。
+这是新安装推荐方式。Compose 只启动 Incudal 和 Redis 7；PostgreSQL 必须由用户提前准备在外部主机、云数据库或独立数据库服务中。安装器会先使用临时 PostgreSQL 客户端容器验证网络、认证和目标数据库访问，验证失败不会生成最终配置或启动应用。首次应用启动时才会在已验证的数据库上执行 `prisma migrate deploy` 创建新结构，不执行 `RESET_DATABASE`，也不导入或覆盖已有数据。
 
 ```bash
-docker build -t incudal:local .
-docker run -d --name incudal \
-  -p 3000:3000 \
-  --env-file .env \
-  incudal:local
+git clone https://github.com/ashvvvvv/incudal-.git
+cd incudal
+sudo bash scripts/install-docker.sh
 ```
 
-生产环境至少需要配置：
+安装器会创建 `/opt/incudal/.env`，生成应用密钥和 Redis 密码，并使用固定的 `stable` 镜像标签；外部 PostgreSQL 密码只用于验证并写入经过 URL 编码的连接串。也可以直接从源码部署：
 
-```env
-NODE_ENV=production
-PORT=3000
-DATABASE_URL=postgresql://user:password@postgres:5432/incudal
-REDIS_URL=redis://redis:6379
-JWT_SECRET=please-change-to-a-long-random-secret
-FRONTEND_URL=https://your-domain.example
+```bash
+cp .env.example .env
+# 编辑 .env，至少设置强密码、FRONTEND_URL 和 Redis 密码
+docker compose up -d --build
+
+docker compose ps
+docker compose logs -f app
 ```
 
-容器启动时会执行 `prisma migrate deploy`，然后启动后端服务。生产部署前请确保数据库可连接、`JWT_SECRET` 足够随机、反向代理和 HTTPS 已配置好。
+默认面板只绑定到 `127.0.0.1:3000`，建议通过 Nginx、Caddy 或 Cloudflare Tunnel 提供 HTTPS。需要直接监听公网时，设置 `APP_BIND_ADDRESS=0.0.0.0`，并自行配置防火墙。
+
+检查健康状态：
+
+```bash
+curl http://127.0.0.1:3000/api/health
+```
+
+升级应用：
+
+```bash
+docker compose up -d --build app
+```
+
+普通停止/卸载不会删除数据库卷：
+
+```bash
+docker compose down
+sudo bash scripts/install-docker.sh --uninstall
+# 如确认永久删除数据：sudo bash scripts/install-docker.sh --purge-data
+docker volume ls
+```
+
+外部 PostgreSQL 的备份由你的数据库服务负责；建议在首次安装、升级或执行 migrations 前使用数据库平台备份，或从 PostgreSQL 客户端执行：
+
+```bash
+pg_dump "$(grep '^DATABASE_URL=' /opt/incudal/.env | cut -d= -f2-)" > incudal-$(date +%Y%m%d-%H%M%S).sql
+```
+
+不要把数据库密码打印到终端或提交到仓库。Redis 数据由 Compose volume 管理，可按需清理或重建。`server/certs` 是 Incus API mTLS 客户端证书目录，不是浏览器 HTTPS 证书目录；挂载前请准备好对应证书并限制权限。
 
 Agent 正式二进制不存放在面板仓库内，面板运行时会从 GitHub Release 查询和代理下载。如部署在私有仓库或 fork，可按需配置：
 
 ```env
-INCUDAL_AGENT_RELEASE_REPOSITORY=qwer-xyz/incudal
+INCUDAL_AGENT_RELEASE_REPOSITORY=ashvvvvv/incudal-
 INCUDAL_AGENT_RELEASE_TOKEN=github_pat_xxx
 ```
 

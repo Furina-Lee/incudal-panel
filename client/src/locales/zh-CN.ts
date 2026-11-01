@@ -212,6 +212,7 @@ export default {
         helpManage: '帮助',
         oauth: 'OAuth',
         broadcast: '公告',
+        status: '状态',
         paymentProviders: '支付',
         billing: '计费',
         withdrawals: '提现',
@@ -239,6 +240,10 @@ export default {
         myPackageEdit: '编辑套餐',
         telegramSettings: 'Telegram 设置',
         adminCreateInstance: '管理员创建实例',
+    },
+
+    status: {
+        title: '系统状态', description: '查看服务运行状态与故障更新。', adminTitle: '状态管理', adminDescription: '管理公开组件与故障事件，不暴露内部基础设施信息。', components: '服务组件', incidents: '故障事件', noComponents: '暂无组件。', noIncidents: '暂无故障事件。', operational: '运行正常', degraded: '服务降级', markOperational: '标记为正常', markDegraded: '标记为降级', componentName: '组件名称', componentDescription: '公开说明', incidentTitle: '事件标题', incidentBody: '公开事件更新', investigating: '调查中', identified: '已确认', monitoring: '监控中', resolved: '已解决', resolve: '解决事件', none: '无影响', minor: '轻微影响', major: '重大影响', critical: '严重影响', maintenance: '计划维护', noMaintenance: '暂无计划维护。', scheduled: '计划中', active: '进行中', completed: '已完成', cancelled: '已取消', maintenanceTitle: '维护标题', maintenanceBody: '公开维护说明', startsAt: '开始时间', endsAt: '结束时间', createMaintenance: '创建维护计划', saveMaintenance: '保存修改', cancelMaintenance: '取消维护', maintenanceUpdate: '维护进度更新', postUpdate: '发布更新'
     },
 
     // 主题
@@ -3734,6 +3739,12 @@ export default {
             // 宿主机状态
             agentStatusTitle: '宿主机状态',
             agentStatusDesc: 'Agent 按 {seconds} 秒间隔上报宿主机实时资源与运行状态',
+            incusVersionLabel: 'Incus 版本',
+            incusApiLabel: 'Incus API',
+            incusCompatibilityTarget: '兼容性目标：Incus {version}',
+            incusCompatibilityReady: '达到最低版本目标；仍需功能验证',
+            incusCompatibilityOlder: '低于当前验证目标；请在测试环境验证',
+            incusCompatibilityUnknown: '版本信息不可用',
             agentStatusRefreshSuccess: '状态接口已刷新，请以最后心跳时间为准',
             agentStatusLoadFailed: '加载宿主机状态失败',
             agentNotInstalled: '未安装',
@@ -4558,6 +4569,7 @@ export default {
             tradeNo: '第三方单号',
             sync: '同步',
             syncSuccess: '同步成功，充值已到账',
+            reconciliationReview: '支付需要人工复核，未增加余额',
             rechargeStatus: {
                 pending: '待支付',
                 completed: '已完成',

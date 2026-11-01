@@ -1,6 +1,67 @@
 package report
 
-import "testing"
+import (
+	"net"
+	"net/http"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestIncusRequestParsesV76ServerCapabilitiesOverUnixSocket(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "incus.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/1.0" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"type":"sync","status":"Success","metadata":{"api_version":"1.0","api_extensions":["instances","operations"],"environment":{"server_version":"7.6.0"}}}`))
+	})}
+	go func() { _ = server.Serve(listener) }()
+	defer server.Close()
+
+	info, err := getIncusServerInfo(newIncusUnixHTTPClient(socketPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.APIVersion != "1.0" || info.Environment.ServerVersion != "7.6.0" {
+		t.Fatalf("unexpected server info: %+v", info)
+	}
+	if len(info.APIExtensions) != 2 || info.APIExtensions[0] != "instances" {
+		t.Fatalf("unexpected API extensions: %#v", info.APIExtensions)
+	}
+}
+
+func TestIncusRequestRejectsErrorEnvelope(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       ioNopCloser(strings.NewReader(`{"type":"error","error":"unsupported API"}`)),
+		}, nil
+	})}
+	_, err := getIncusServerInfo(client)
+	if err == nil || !strings.Contains(err.Error(), "unsupported API") {
+		t.Fatalf("expected Incus error envelope, got %v", err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
+
+type readCloser struct{ *strings.Reader }
+
+func (readCloser) Close() error { return nil }
+
+func ioNopCloser(reader *strings.Reader) readCloser { return readCloser{Reader: reader} }
 
 func TestHeartbeatPayloadIncludesHostMetrics(t *testing.T) {
 	payload := HeartbeatPayload("test-version", 30)

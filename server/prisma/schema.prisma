@@ -12,6 +12,99 @@ datasource db {
 
 // ==================== 枚举类型 ====================
 
+model StatusComponent {
+  id            Int      @id @default(autoincrement())
+  name          String   @db.VarChar(120)
+  description   String?  @db.VarChar(500)
+  sortOrder     Int      @default(0) @map("sort_order")
+  isOperational Boolean  @default(true) @map("is_operational")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@unique([name])
+  @@index([sortOrder])
+  @@map("status_components")
+}
+
+model StatusIncident {
+  id        Int                      @id @default(autoincrement())
+  title     String                   @db.VarChar(200)
+  status    String                   @db.VarChar(32)
+  impact    String                   @db.VarChar(16)
+  body      String                   @db.Text
+  startedAt DateTime                 @default(now()) @map("started_at")
+  resolvedAt DateTime?               @map("resolved_at")
+  createdAt DateTime                 @default(now()) @map("created_at")
+  updatedAt DateTime                 @updatedAt @map("updated_at")
+  updates   StatusIncidentUpdate[]
+
+  @@index([startedAt])
+  @@map("status_incidents")
+}
+
+model StatusIncidentUpdate {
+  id         Int           @id @default(autoincrement())
+  incidentId Int           @map("incident_id")
+  status     String        @db.VarChar(32)
+  body       String        @db.Text
+  createdAt  DateTime      @default(now()) @map("created_at")
+  incident   StatusIncident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId, createdAt])
+  @@map("status_incident_updates")
+}
+
+enum MaintenanceStatus {
+  scheduled
+  active
+  completed
+  cancelled
+}
+
+model StatusMaintenance {
+  id             Int                  @id @default(autoincrement())
+  title          String               @db.VarChar(200)
+  body           String               @db.Text
+  status         MaintenanceStatus    @default(scheduled)
+  impact         String               @default("minor") @db.VarChar(16)
+  scheduledStart DateTime             @map("scheduled_start")
+  scheduledEnd   DateTime             @map("scheduled_end")
+  startedAt      DateTime?            @map("started_at")
+  completedAt    DateTime?            @map("completed_at")
+  cancelledAt    DateTime?            @map("cancelled_at")
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
+  updates        StatusMaintenanceUpdate[]
+  deliveries     StatusMaintenanceDelivery[]
+
+  @@index([status, scheduledStart, scheduledEnd])
+  @@map("status_maintenances")
+}
+
+model StatusMaintenanceUpdate {
+  id            Int              @id @default(autoincrement())
+  maintenanceId Int              @map("maintenance_id")
+  body          String           @db.Text
+  createdAt     DateTime         @default(now()) @map("created_at")
+  maintenance   StatusMaintenance @relation(fields: [maintenanceId], references: [id], onDelete: Cascade)
+
+  @@index([maintenanceId, createdAt])
+  @@map("status_maintenance_updates")
+}
+
+model StatusMaintenanceDelivery {
+  id            Int              @id @default(autoincrement())
+  maintenanceId Int              @map("maintenance_id")
+  eventKey      String           @map("event_key") @db.VarChar(64)
+  userId        Int              @map("user_id")
+  deliveredAt   DateTime         @default(now()) @map("delivered_at")
+  maintenance   StatusMaintenance @relation(fields: [maintenanceId], references: [id], onDelete: Cascade)
+
+  @@unique([maintenanceId, eventKey, userId])
+  @@index([eventKey, deliveredAt])
+  @@map("status_maintenance_deliveries")
+}
+
 enum UserRole {
   admin
   user
@@ -2073,6 +2166,7 @@ model BalanceLog {
 
   // 关联信息
   orderId    String? @map("order_id")    // 充值订单号
+  idempotencyKey String? @unique @map("idempotency_key") // 充值入账永久防重；其他余额日志保持 null
   instanceId Int?    @map("instance_id") // 关联实例
   remark     String?                      // 备注
 

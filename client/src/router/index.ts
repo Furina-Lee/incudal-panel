@@ -71,6 +71,18 @@ async function handleOAuthCode(): Promise<boolean> {
 
 const routes: RouteRecordRaw[] = [
   {
+    path: '/status',
+    name: 'status',
+    component: () => import('@/views/StatusView.vue'),
+    meta: { public: true, titleKey: 'status.title', title: 'System Status' }
+  },
+  {
+    path: '/admin/status',
+    name: 'admin-status',
+    component: () => import('@/views/admin/StatusManageView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, titleKey: 'status.adminTitle', title: 'Status Management' }
+  },
+  {
     path: '/login',
     name: 'login',
     component: () => import('@/views/LoginView.vue'),
