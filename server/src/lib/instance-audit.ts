@@ -3,6 +3,8 @@ export type AuditFindingTarget = 'process' | 'network' | 'startup' | 'capability
 export type AuditRuleTarget = 'process' | 'network' | 'startup'
 export type AuditRuleMatchType = 'contains' | 'regex' | 'exact'
 export type AuditRuleSource = 'builtin' | 'custom'
+export type AuditProtocolCategory = 'shadowsocks' | 'shadowsocksr' | 'socks5' | 'trojan'
+export type AuditProtocolConfidence = 'low' | 'medium' | 'high'
 
 export interface AuditProcess {
   pid: number
@@ -49,6 +51,9 @@ export interface AuditFinding {
   recommendation?: string | null
   pid?: number
   evidence: string
+  protocolCategory?: AuditProtocolCategory
+  confidence?: AuditProtocolConfidence
+  confidenceNote?: string
   ignored?: boolean
   ignoreReason?: string | null
 }
@@ -84,6 +89,76 @@ export interface AuditIgnoreDefinition {
   matchText?: string | null
   reason?: string | null
   expiresAt?: Date | string | null
+}
+
+export interface ProtocolHeuristicFinding {
+  protocolCategory: AuditProtocolCategory
+  confidence: AuditProtocolConfidence
+  confidenceNote: string
+  evidence: string
+}
+
+interface ProtocolHeuristicRule {
+  protocolCategory: AuditProtocolCategory
+  markers: RegExp[]
+  confidence: AuditProtocolConfidence
+}
+
+const PROTOCOL_HEURISTIC_RULES: ProtocolHeuristicRule[] = [
+  {
+    protocolCategory: 'shadowsocksr',
+    markers: [/shadowsocksr/i, /\bssr(?:-local|-server)?\b/i, /protocol(?:_param)?\s*[:=]/i],
+    confidence: 'high'
+  },
+  {
+    protocolCategory: 'shadowsocks',
+    markers: [/shadowsocks/i, /\bss(?:-local|-server|server|local)?\b/i, /\bchacha20|aes-\d+(-gcm)?|2022-blake3\b/i],
+    confidence: 'medium'
+  },
+  {
+    protocolCategory: 'socks5',
+    markers: [/socks5?/i, /\b(sock[sd]|danted|3proxy)\b/i, /proxy[_-]?protocol\s*[:=]\s*socks/i],
+    confidence: 'medium'
+  },
+  {
+    protocolCategory: 'trojan',
+    markers: [/\btrojan(?:-go|rs)?\b/i, /\btrojan(?:s)?\s+(?:server|client)\b/i],
+    confidence: 'high'
+  }
+]
+
+const PROTOCOL_CONFIDENCE_RANK: Record<AuditProtocolConfidence, number> = { low: 0, medium: 1, high: 2 }
+
+/**
+ * Detect protocol-like markers from instance-local evidence only.
+ * This is intentionally heuristic: names/configuration/connection text do not prove protocol use.
+ */
+export function detectProxyProtocols(input: {
+  processes?: Pick<AuditProcess, 'command' | 'args' | 'raw'>[]
+  startupItems?: Pick<AuditStartupItem, 'command' | 'raw'>[]
+  connections?: Pick<AuditConnection, 'protocol' | 'process' | 'raw'>[]
+}): ProtocolHeuristicFinding[] {
+  const evidence = [
+    ...(input.processes || []).map(item => `${item.command} ${item.args} ${item.raw}`),
+    ...(input.startupItems || []).map(item => `${item.command} ${item.raw}`),
+    ...(input.connections || []).map(item => `${item.protocol} ${item.process || ''} ${item.raw}`)
+  ]
+  const findings: ProtocolHeuristicFinding[] = []
+  for (const rule of PROTOCOL_HEURISTIC_RULES) {
+    const matchedEvidence = evidence.find(text => rule.markers.some(marker => marker.test(text)))
+    if (!matchedEvidence) continue
+    const markerCount = rule.markers.filter(marker => evidence.some(text => marker.test(text))).length
+    const confidence = markerCount >= 2 ? 'high' : rule.confidence
+    findings.push({
+      protocolCategory: rule.protocolCategory,
+      confidence,
+      confidenceNote: confidence === 'high'
+        ? '高置信度：实例内存在多个协议相关进程、启动项或网络证据标记，仍需结合业务配置人工确认。'
+        : '低置信度：仅命中单一实例内名称或文本标记，不能单独证明协议实际提供服务。',
+      evidence: matchedEvidence.slice(0, 800)
+    })
+  }
+  return findings.sort((a, b) => PROTOCOL_CONFIDENCE_RANK[b.confidence] - PROTOCOL_CONFIDENCE_RANK[a.confidence])
 }
 
 export const BUILTIN_AUDIT_RULES: AuditRuleDefinition[] = [
@@ -432,6 +507,22 @@ export function analyzeAuditData(input: {
         evidence: connection.raw
       }))
     }
+  })
+
+  const protocolFindings = detectProxyProtocols(input)
+  protocolFindings.forEach((protocolFinding, index) => {
+    findings.push({
+      id: `protocol-${index}-${protocolFinding.protocolCategory}`,
+      severity: 'low',
+      category: 'proxy-protocol',
+      title: `疑似 ${protocolFinding.protocolCategory} 代理协议`,
+      detail: protocolFinding.confidenceNote,
+      targetType: 'process',
+      protocolCategory: protocolFinding.protocolCategory,
+      confidence: protocolFinding.confidence,
+      confidenceNote: protocolFinding.confidenceNote,
+      evidence: protocolFinding.evidence
+    })
   })
 
   const udpConnections = input.connections.filter(row => /^udp/i.test(row.protocol)).length

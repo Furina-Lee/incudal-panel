@@ -63,6 +63,7 @@ export async function initSystemConfig(): Promise<void> {
         { key: 'invite_default_expire_days', value: '0', type: 'number', label: '用户邀请码有效期', description: '用户生成邀请码的默认有效天数，0 表示永不过期' },
         { key: 'user_vip_metric', value: 'totalRecharge', type: 'string', label: '用户 VIP 统计口径', description: '用户 VIP 等级全局计算口径：totalRecharge=累计充值，totalConsume=累计消费' },
         { key: 'hosting_feature_enabled', value: 'true', type: 'boolean', label: '托管节点入口', description: '关闭后，仅对已经创建过节点的用户显示托管节点和收益入口' },
+        { key: 'instance_audit_enabled', value: 'false', type: 'boolean', label: '实例审查扫描', description: '启用后允许管理员或节点所有者读取实例内进程、启动项和网络证据进行审查；默认关闭' },
         { key: 'hosting_market_entry_enabled', value: 'true', type: 'boolean', label: '托管套餐购买入口', description: '控制开通实例页面是否显示托管专区和托管套餐购买入口' },
         { key: 'hosting_notice', value: '', type: 'string', label: '托管公告', description: '显示在托管收益页面的公告内容，留空则不显示' },
         { key: 'ticket_enabled', value: 'true', type: 'boolean', label: '工单开关', description: '关闭后，普通用户无法发起工单，用户端隐藏工单入口' },

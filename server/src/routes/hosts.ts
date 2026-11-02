@@ -7445,6 +7445,12 @@ export default async function hostRoutes(fastify: FastifyInstance) {
     onRequest: [fastify.authenticate]
   }, async (request, reply) => {
     const { user } = request
+    if (!await db.getSystemConfigBoolean('instance_audit_enabled', false)) {
+      return reply.code(403).send({
+        error: '实例审查功能已关闭，请先在系统配置中启用 instance_audit_enabled',
+        code: 'INSTANCE_AUDIT_DISABLED'
+      })
+    }
     const hostId = Number(request.params.id)
     const instanceId = Number(request.params.instanceId)
 
