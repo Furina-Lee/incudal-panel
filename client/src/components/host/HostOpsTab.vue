@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import api from '@/api'
 import type { SshKey, SystemImage } from '@/types/api'
@@ -159,6 +159,8 @@ interface InstanceAuditFinding {
   recommendation?: string | null
   pid?: number
   evidence: string
+  protocolCategory?: string | null
+  confidence?: number | string | null
   ignored?: boolean
   ignoreReason?: string | null
 }
@@ -299,6 +301,14 @@ const auditPanel = ref<'scan' | 'rules' | 'whitelist' | 'history'>('scan')
 const auditRules = ref<InstanceAuditRule[]>([])
 const auditIgnores = ref<InstanceAuditIgnore[]>([])
 const auditHistory = ref<InstanceAuditHistory>({ scans: [], actions: [] })
+const auditEnabled = ref(false)
+const loadingAuditConfig = ref(false)
+const selectedAuditInstanceIds = ref<number[]>([])
+const batchAuditProgress = ref({ current: 0, total: 0 })
+const batchAuditResults = ref<Array<{ instanceId: number; instanceName?: string; success: boolean; summary?: { riskLevel?: AuditSeverity; findingCount?: number; processCount?: number; connectionCount?: number; listeningCount?: number }; findings?: InstanceAuditFinding[]; error?: string }>>([])
+const auditTrafficRate = ref<{ rx: number; tx: number } | null>(null)
+let trafficSampleTimer: ReturnType<typeof setInterval> | null = null
+let lastTrafficSample: { rx: number; tx: number; time: number } | null = null
 const loadingAuditMeta = ref(false)
 const expandedAuditFindingIds = ref<string[]>([])
 
@@ -307,6 +317,102 @@ const selectedManaged = computed(() => {
   if (!discoverResult.value || selectedManagedDbId.value === null) return null
   return discoverResult.value.managed.find(item => item.dbId === selectedManagedDbId.value) || null
 })
+const allAuditInstancesSelected = computed(() => Boolean(discoverResult.value?.managed.length) && selectedAuditInstanceIds.value.length === discoverResult.value!.managed.length)
+
+function resetTrafficSamples() {
+  lastTrafficSample = null
+  auditTrafficRate.value = null
+}
+
+async function sampleAuditTraffic() {
+  if (!selectedManaged.value || !auditResult.value) return
+  try {
+    const stats = await api.instances.getStats(selectedManaged.value.dbId)
+    const sample = { rx: stats.network.bytesReceived, tx: stats.network.bytesSent, time: Date.now() }
+    if (lastTrafficSample) {
+      const elapsed = (sample.time - lastTrafficSample.time) / 1000
+      if (elapsed > 0 && sample.rx >= lastTrafficSample.rx && sample.tx >= lastTrafficSample.tx) {
+        auditTrafficRate.value = { rx: (sample.rx - lastTrafficSample.rx) / elapsed, tx: (sample.tx - lastTrafficSample.tx) / elapsed }
+      } else {
+        auditTrafficRate.value = null
+      }
+    }
+    lastTrafficSample = sample
+  } catch {
+    auditTrafficRate.value = null
+    lastTrafficSample = null
+  }
+}
+
+function formatByteRate(bytes: number): string {
+  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s']
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++ }
+  return `${value.toFixed(unit ? 1 : 0)} ${units[unit]}`
+}
+
+function toggleAuditInstance(id: number) {
+  selectedAuditInstanceIds.value = selectedAuditInstanceIds.value.includes(id)
+    ? selectedAuditInstanceIds.value.filter(item => item !== id)
+    : [...selectedAuditInstanceIds.value, id]
+}
+
+function toggleAllAuditInstances() {
+  selectedAuditInstanceIds.value = allAuditInstancesSelected.value ? [] : (discoverResult.value?.managed.map(item => item.dbId) || [])
+}
+
+async function loadAuditEnabled() {
+  loadingAuditConfig.value = true
+  try {
+    const { configs } = await api.systemConfig.list()
+    const setting = configs.find(config => config.key === 'instance_audit_enabled')
+    auditEnabled.value = setting?.value === 'true'
+  } catch (err: any) {
+    toast.error('读取审查开关失败: ' + (err?.message || String(err)))
+  } finally {
+    loadingAuditConfig.value = false
+  }
+}
+
+async function toggleAuditEnabled() {
+  if (loadingAuditConfig.value) return
+  const next = !auditEnabled.value
+  loadingAuditConfig.value = true
+  try {
+    await api.systemConfig.update([{ key: 'instance_audit_enabled', value: String(next) }])
+    auditEnabled.value = next
+    if (!next) { auditResult.value = null; batchAuditResults.value = [] }
+    toast.success(next ? '实例审查已启用' : '实例审查已停用')
+  } catch (err: any) {
+    toast.error('更新审查开关失败: ' + (err?.message || String(err)))
+  } finally {
+    loadingAuditConfig.value = false
+  }
+}
+
+async function runBatchAudit() {
+  if (!props.hostId || loadingAction.value || !auditEnabled.value || !selectedAuditInstanceIds.value.length) return
+  loadingAction.value = 'auditScan'
+  batchAuditResults.value = []
+  batchAuditProgress.value = { current: 0, total: selectedAuditInstanceIds.value.length }
+  try {
+    const response = await api.hosts.opsInstancesAuditBatch(props.hostId, selectedAuditInstanceIds.value)
+    batchAuditResults.value = response.results.map(row => ({
+      ...row,
+      success: row.status === 'success',
+      instanceName: row.name || discoverResult.value?.managed.find(item => item.dbId === row.instanceId)?.incusName,
+      findings: row.findings as InstanceAuditFinding[] | undefined
+    }))
+    batchAuditProgress.value = { current: response.results.length, total: response.results.length }
+    touchLastRun('auditScan')
+    void loadAuditHistory()
+  } catch (err: any) {
+    toast.error('批量审查失败: ' + (err?.message || String(err)))
+  } finally {
+    loadingAction.value = ''
+  }
+}
 
 const dangerousAction = ref<'rebuild' | 'recreate'>('recreate')
 const selectedImageId = ref<number | null>(null)
@@ -884,6 +990,7 @@ watch(selectedImageId, () => {
 
 watch(selectedManagedDbId, () => {
   auditResult.value = null
+  resetTrafficSamples()
   expandedAuditFindingIds.value = []
   resetAuditActionState()
   if (auditPanel.value === 'whitelist') void loadAuditIgnores()
@@ -897,7 +1004,22 @@ watch(auditPanel, (panel) => {
 })
 
 watch(activeOpsMenu, (menu) => {
-  if (menu === 'audit' && auditPanel.value === 'rules') void loadAuditRules()
+  if (menu === 'audit') {
+    void loadAuditEnabled()
+    if (auditPanel.value === 'rules') void loadAuditRules()
+  }
+})
+
+watch([activeOpsMenu, auditPanel, selectedManagedDbId, auditResult], ([menu, panel, instanceId, result]) => {
+  if (trafficSampleTimer) { clearInterval(trafficSampleTimer); trafficSampleTimer = null }
+  if (menu !== 'audit' || panel !== 'scan' || !result || instanceId === null) return
+  resetTrafficSamples()
+  void sampleAuditTraffic()
+  trafficSampleTimer = setInterval(() => void sampleAuditTraffic(), 5000)
+})
+
+onUnmounted(() => {
+  if (trafficSampleTimer) clearInterval(trafficSampleTimer)
 })
 
 async function runDiscover() {
@@ -1554,43 +1676,73 @@ async function runAuditKillProcess() {
             <h3 class="text-base font-semibold text-themed">实例审查</h3>
             <p class="text-xs text-themed-muted mt-1">人工扫描进程、网络连接和启动项，发现可疑项后由运维人员手动处置。</p>
           </div>
-          <button class="btn-secondary btn-sm" :disabled="loadingAction !== ''" @click="runDiscover">
-            {{ loadingAction === 'discover' ? '...' : '刷新实例列表' }}
-          </button>
+          <div class="flex flex-wrap items-center gap-2">
+            <label class="inline-flex items-center gap-2 text-sm text-themed-muted">
+              <input type="checkbox" :checked="auditEnabled" :disabled="loadingAuditConfig" @change="toggleAuditEnabled" />
+              审查启用
+            </label>
+            <button class="btn-secondary btn-sm" :disabled="loadingAction !== ''" @click="runDiscover">
+              {{ loadingAction === 'discover' ? '...' : '刷新实例列表' }}
+            </button>
+          </div>
         </div>
 
+        <div v-if="!auditEnabled" class="rounded-lg border p-3 text-sm text-amber-600" :class="themeStore.isDark ? 'border-amber-900 bg-amber-950/20' : 'border-amber-200 bg-amber-50'">
+          实例审查当前已关闭。启用后才可执行单实例或批量扫描。
+        </div>
         <div v-if="discoverResult" class="grid gap-4 xl:grid-cols-[minmax(260px,360px)_1fr]">
-          <div class="rounded-xl border p-4 space-y-3" :class="themeStore.isDark ? 'border-gray-800' : 'border-gray-200'">
-            <div class="font-medium text-themed">选择审查实例</div>
+          <div class="rounded-xl border p-4 space-y-3 min-w-0" :class="themeStore.isDark ? 'border-gray-800' : 'border-gray-200'">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <div class="font-medium text-themed">选择审查实例</div>
+              <label class="inline-flex items-center gap-2 text-xs text-themed-muted"><input type="checkbox" :checked="allAuditInstancesSelected" @change="toggleAllAuditInstances" />全选</label>
+            </div>
             <div v-if="discoverResult.managed.length" class="space-y-2 max-h-96 overflow-auto">
-              <button
+              <div
                 v-for="item in discoverResult.managed"
                 :key="`audit-${item.dbId}-${item.incusName}`"
-                type="button"
-                class="w-full rounded-lg px-3 py-2 text-left text-sm border transition"
+                class="flex items-start gap-3 rounded-lg px-3 py-2 text-sm border transition min-w-0"
                 :class="selectedManagedDbId === item.dbId
                   ? (themeStore.isDark ? 'border-blue-500 bg-blue-500/10' : 'border-blue-500 bg-blue-50')
                   : (themeStore.isDark ? 'border-gray-800 bg-gray-900 hover:border-gray-700' : 'border-gray-200 bg-gray-50 hover:border-gray-300')"
-                @click="selectedManagedDbId = item.dbId"
               >
-                <div class="font-medium text-themed">{{ item.incusName }}</div>
-                <div class="text-xs text-themed-muted mt-1">
-                  {{ localizeType(item.incusType) }} · {{ localizeStatus(item.incusStatus) }} · 用户 ID: {{ item.userId }}
-                </div>
-              </button>
+                <input class="mt-1 shrink-0" type="checkbox" :checked="selectedAuditInstanceIds.includes(item.dbId)" @change="toggleAuditInstance(item.dbId)" />
+                <button type="button" class="min-w-0 flex-1 text-left" @click="selectedManagedDbId = item.dbId">
+                  <div class="font-medium text-themed break-all">{{ item.incusName }}</div>
+                  <div class="text-xs text-themed-muted mt-1 break-words">
+                    {{ localizeType(item.incusType) }} · {{ localizeStatus(item.incusStatus) }} · 用户 ID: {{ item.userId }}
+                  </div>
+                </button>
+              </div>
             </div>
             <div v-else class="text-sm text-themed-muted">当前没有已纳管实例。</div>
           </div>
 
           <div class="rounded-xl border p-4 space-y-4" :class="themeStore.isDark ? 'border-gray-800' : 'border-gray-200'">
-            <div class="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <div class="font-medium text-themed">{{ selectedManaged?.incusName || '未选择实例' }}</div>
+            <div class="flex items-start justify-between gap-3 flex-wrap">
+              <div class="min-w-0">
+                <div class="font-medium text-themed break-all">{{ selectedManaged?.incusName || '未选择实例' }}</div>
                 <div class="text-xs text-themed-muted mt-1">扫描不会自动封禁，也不会自动停止进程。</div>
               </div>
-              <button class="btn-primary btn-sm" :disabled="loadingAction !== '' || !selectedManaged" @click="runAuditScan">
-                {{ loadingAction === 'auditScan' ? '扫描中...' : '开始审查扫描' }}
-              </button>
+              <div class="flex flex-wrap gap-2">
+                <button class="btn-secondary btn-sm" :disabled="loadingAction !== '' || !auditEnabled || !selectedAuditInstanceIds.length" @click="runBatchAudit">
+                  {{ loadingAction === 'auditScan' && batchAuditProgress.total ? '批量审查中...' : `批量审查 (${selectedAuditInstanceIds.length})` }}
+                </button>
+                <button class="btn-primary btn-sm" :disabled="loadingAction !== '' || !selectedManaged || !auditEnabled" @click="runAuditScan">
+                  {{ loadingAction === 'auditScan' ? '扫描中...' : '开始审查扫描' }}
+                </button>
+              </div>
+            </div>
+            <div v-if="batchAuditProgress.total" class="space-y-2">
+              <div class="flex justify-between gap-2 text-xs text-themed-muted"><span>批量进度</span><span>{{ batchAuditProgress.current }} / {{ batchAuditProgress.total }}</span></div>
+              <div class="h-2 rounded-full overflow-hidden" :class="themeStore.isDark ? 'bg-gray-800' : 'bg-gray-200'"><div class="h-full bg-blue-600 transition-all" :style="{ width: `${batchAuditProgress.total ? batchAuditProgress.current / batchAuditProgress.total * 100 : 0}%` }" /></div>
+            </div>
+            <div v-if="batchAuditResults.length" class="space-y-2 max-h-72 overflow-auto">
+              <div v-for="row in batchAuditResults" :key="row.instanceId" class="rounded-lg border p-3 text-sm min-w-0" :class="themeStore.isDark ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-gray-50'">
+                <div class="flex flex-wrap justify-between gap-2"><span class="font-medium text-themed break-all">{{ row.instanceName || `#${row.instanceId}` }}</span><span :class="row.success ? 'text-emerald-500' : 'text-red-500'">{{ row.success ? '成功' : '失败' }}</span></div>
+                <div v-if="row.summary" class="text-xs text-themed-muted mt-1">风险 {{ row.summary.riskLevel ? localizeSeverity(row.summary.riskLevel) : '-' }} · 发现 {{ row.summary.findingCount ?? 0 }} · 连接 {{ row.summary.connectionCount ?? 0 }} · 监听 {{ row.summary.listeningCount ?? 0 }}</div>
+                <div v-if="row.error" class="text-xs text-red-500 mt-1 break-words">{{ row.error }}</div>
+                <div v-for="finding in row.findings || []" :key="finding.id" class="text-xs text-themed-muted mt-2 break-words">{{ localizeAuditCategory(finding.protocolCategory || finding.category) }} · {{ localizeAuditText(finding.title) }} · {{ finding.confidence ?? '—' }} · {{ finding.evidence }}</div>
+              </div>
             </div>
 
             <div v-if="auditResult" class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -1613,6 +1765,10 @@ async function runAuditKillProcess() {
               <div class="rounded-xl p-3" :class="themeStore.isDark ? 'bg-gray-900' : 'bg-gray-50'">
                 <div class="text-xs text-themed-muted">监听端口</div>
                 <div class="text-lg font-semibold mt-1 text-themed">{{ auditResult.summary.listeningCount }}</div>
+              </div>
+              <div class="rounded-xl p-3 sm:col-span-2 xl:col-span-5" :class="themeStore.isDark ? 'bg-gray-900' : 'bg-gray-50'">
+                <div class="text-xs text-themed-muted">当前累计流量速率</div>
+                <div class="text-sm font-semibold mt-1 text-themed">{{ auditTrafficRate ? `↓ ${formatByteRate(auditTrafficRate.rx)} / ↑ ${formatByteRate(auditTrafficRate.tx)}` : '等待下一样本' }}</div>
               </div>
             </div>
           </div>
@@ -1638,7 +1794,7 @@ async function runAuditKillProcess() {
               <div class="text-xs text-themed-muted mt-1">{{ localizeFindingDetail(finding.detail) }}</div>
               <div class="mt-2 grid gap-2 text-xs sm:grid-cols-2">
                 <div class="text-themed-muted">规则：{{ localizeAuditText(finding.ruleName || finding.ruleId) }} / {{ localizeRuleSource(finding.ruleSource) }}</div>
-                <div class="text-themed-muted">分类：{{ localizeAuditCategory(finding.category) }} / 命中：{{ finding.matchedText || '-' }}</div>
+                <div class="text-themed-muted">分类：{{ localizeAuditCategory(finding.protocolCategory || finding.category) }} / 命中：{{ finding.matchedText || '-' }} / 置信度：{{ finding.confidence ?? '-' }}</div>
                 <div v-if="finding.recommendation" class="text-themed-muted sm:col-span-2">建议：{{ localizeAuditText(finding.recommendation) }}</div>
                 <div v-if="finding.ignored" class="text-blue-500 sm:col-span-2">已被白名单忽略：{{ finding.ignoreReason || '-' }}</div>
               </div>

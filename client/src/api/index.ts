@@ -1765,6 +1765,44 @@ const api = {
       }>
       stderr?: string[]
     }> => http.post(`/hosts/${hostId}/ops/instances/${instanceId}/audit/scan`),
+    opsInstancesAuditBatch: (hostId: number, instanceIds: number[]): Promise<{
+      success: boolean
+      results: Array<{
+        instanceId: number
+        name?: string
+        status: 'success' | 'failed' | string
+        scanId?: number
+        scannedAt?: string
+        summary?: {
+          riskLevel?: 'info' | 'low' | 'medium' | 'high'
+          processCount?: number
+          connectionCount?: number
+          listeningCount?: number
+          startupItemCount?: number
+          findingCount?: number
+        }
+        findings?: Array<{
+          id: string
+          severity: 'info' | 'low' | 'medium' | 'high'
+          category: string
+          title: string
+          detail: string
+          targetType: 'process' | 'network' | 'startup' | 'capability'
+          ruleId?: string
+          ruleName?: string
+          ruleSource?: 'builtin' | 'custom'
+          matchedText?: string
+          recommendation?: string | null
+          pid?: number
+          evidence: string
+          protocolCategory?: string | null
+          confidence?: number | string | null
+          ignored?: boolean
+          ignoreReason?: string | null
+        }>
+        error?: string
+      }>
+    }> => http.post(`/hosts/${hostId}/ops/instances/audit/batch`, { instanceIds }),
     opsInstanceAuditKillProcess: (hostId: number, instanceId: number, data: {
       pid: number
       signal?: 'TERM' | 'KILL'
