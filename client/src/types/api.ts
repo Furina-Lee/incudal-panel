@@ -560,6 +560,47 @@ export interface UpdateInstanceRequest {
   siteLimit?: number | null  // 0 = 不限制, null = 继承套餐
 }
 
+export interface InstanceAuditFinding {
+  id: string
+  severity: 'info' | 'low' | 'medium' | 'high'
+  category: string
+  protocolCategory?: string | null
+  title: string
+  detail: string
+  targetType: 'process' | 'network' | 'startup' | 'capability'
+  ruleId?: string
+  ruleName?: string
+  ruleSource?: 'builtin' | 'custom'
+  matchedText?: string
+  recommendation?: string | null
+  pid?: number
+  evidence: string
+  confidence?: number | string | null
+  ignored?: boolean
+  ignoreReason?: string | null
+}
+
+export interface InstanceAuditBatchResult {
+  success: boolean
+  results: Array<{
+    instanceId: number
+    name?: string
+    status: 'success' | 'failed' | string
+    scanId?: number
+    scannedAt?: string
+    summary?: {
+      riskLevel?: 'info' | 'low' | 'medium' | 'high'
+      processCount?: number
+      connectionCount?: number
+      listeningCount?: number
+      startupItemCount?: number
+      findingCount?: number
+    }
+    findings?: InstanceAuditFinding[]
+    error?: string
+  }>
+}
+
 export interface InstanceStats {
   cpu: {
     usage: number
