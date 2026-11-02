@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useConfigStore } from '@/stores/config'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import PublicSiteLayout from '@/components/public/PublicSiteLayout.vue'
 import ToastContainer from '@/components/ToastContainer.vue'
 import PopupAnnouncementModal from '@/components/PopupAnnouncementModal.vue'
 
@@ -23,11 +24,10 @@ const hiddenHostingRouteNames = new Set([
   'hosting-wallet'
 ])
 
-// 不需要布局的页面
-const noLayoutRoutes: string[] = ['login', 'register']
-const showLayout = computed<boolean>(() => {
-  return authStore.isAuthenticated && !noLayoutRoutes.includes(route.name as string)
-})
+// 公开站点和认证页面使用独立壳层，避免与运维控制台布局嵌套。
+const publicSiteRoutes = new Set(['portal', 'market', 'status', 'login', 'register', 'forgot-password'])
+const isPublicSiteRoute = computed<boolean>(() => publicSiteRoutes.has(String(route.name || '')) || route.meta.public === true)
+const showLayout = computed<boolean>(() => authStore.isAuthenticated && !isPublicSiteRoute.value)
 
 watchEffect(() => {
   locale.value
@@ -177,6 +177,13 @@ onUnmounted(() => {
       </template>
     </RouterView>
   </AppLayout>
+  <PublicSiteLayout v-else-if="isPublicSiteRoute">
+    <RouterView v-slot="{ Component, route: currentRoute }">
+      <template v-if="Component">
+        <component :is="Component" :key="currentRoute.name" />
+      </template>
+    </RouterView>
+  </PublicSiteLayout>
   <RouterView v-else v-slot="{ Component, route: currentRoute }">
     <template v-if="Component">
       <component :is="Component" :key="currentRoute.name" />

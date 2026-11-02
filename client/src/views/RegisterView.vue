@@ -10,6 +10,8 @@ import TurnstileWidget from '@/components/TurnstileWidget.vue'
 import TermsOfServiceModal from '@/components/TermsOfServiceModal.vue'
 import api from '@/api'
 import { useBrand } from '@/composables/useBrand'
+import PublicAuthShell from '@/components/public/PublicAuthShell.vue'
+import { useM3Auth } from '@/composables/useM3Auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -17,6 +19,7 @@ const { t } = useI18n()
 const authStore = useAuthStore()
 const themeStore = useThemeStore()
 const brand = useBrand()
+const { ui } = useM3Auth()
 
 interface RegisterForm {
   username: string
@@ -297,7 +300,7 @@ async function handleRegister(): Promise<void> {
     // 注册成功后自动登录并跳转到后台
     // 管理员跳转到用户管理页面，普通用户跳转到 dashboard
     // 优化：减少延迟时间从 1.5 秒到 0.5 秒
-    const targetRoute = authStore.isAdmin ? '/admin/users' : '/'
+    const targetRoute = authStore.isAdmin ? '/admin/users' : '/dashboard'
     setTimeout(() => router.push(targetRoute), 500)
   } catch (err: any) {
     error.value = translateError(err)
@@ -308,45 +311,21 @@ async function handleRegister(): Promise<void> {
 </script>
 
 <template>
-  <div 
-    class="min-h-screen flex items-center justify-center p-4"
-    :class="themeStore.isDark ? 'bg-[#0a0a0a]' : 'bg-gray-50'"
-  >
-    <div class="w-full max-w-sm">
-      <!-- Logo -->
-      <div class="text-center mb-8">
-        <img
-          :src="brand.brandLogoUrl"
-          :alt="brand.brandName"
-          class="w-16 h-16 mx-auto mb-2 rounded-xl"
-        />
-        <h2 
-          class="text-lg font-semibold mb-1"
-          :class="themeStore.isDark ? 'text-gray-100' : 'text-gray-900'"
-        >
-          {{ brand.brandName }}
-        </h2>
-        <p 
-          class="text-sm"
-          :class="themeStore.isDark ? 'text-gray-500' : 'text-gray-600'"
-        >
-          {{ $t('auth.createAccount') }}
-        </p>
-      </div>
-
+  <PublicAuthShell :title="$t('auth.createAccount')" :subtitle="brand.brandSubtitle">
+    <div class="w-full rounded-[28px] p-6 sm:p-8" :class="ui.card">
       <!-- 注册成功 -->
-      <div v-if="success" class="card p-6 text-center">
+      <div v-if="success" class="p-6 text-center">
         <svg class="w-12 h-12 mx-auto mb-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <p :class="themeStore.isDark ? 'text-gray-300' : 'text-gray-700'">{{ $t('auth.registerSuccess') }}</p>
       </div>
 
-      <div v-else-if="configLoading" class="card p-6 text-center">
+      <div v-else-if="configLoading" class="p-6 text-center">
         <p :class="themeStore.isDark ? 'text-gray-300' : 'text-gray-700'">{{ $t('common.loading') }}...</p>
       </div>
 
-      <div v-else-if="!registrationEnabled" class="card p-6 text-center">
+      <div v-else-if="!registrationEnabled" class="p-6 text-center">
         <svg class="w-12 h-12 mx-auto mb-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m0 3.75h.007v.008H12v-.008z" />
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.34 3.94 1.82 18a1.875 1.875 0 0 0 1.604 2.812h17.152A1.875 1.875 0 0 0 22.18 18L13.66 3.94a1.875 1.875 0 0 0-3.32 0Z" />
@@ -357,13 +336,13 @@ async function handleRegister(): Promise<void> {
         <p class="text-sm leading-6 mb-5" :class="themeStore.isDark ? 'text-gray-400' : 'text-gray-600'">
           {{ $t('auth.registrationClosedMessage') }}
         </p>
-        <button type="button" class="btn-primary w-full" @click="router.push('/login')">
+        <button type="button" :class="['inline-flex h-11 w-full items-center justify-center rounded-xl px-5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60', ui.filled]" @click="router.push('/login')">
           {{ $t('auth.backToLogin') }}
         </button>
       </div>
 
       <!-- 注册表单 -->
-      <div v-else class="card p-6">
+      <div v-else>
         <form class="space-y-4" @submit.prevent="handleRegister">
           <div v-if="requireInviteCode">
             <label 
@@ -372,7 +351,7 @@ async function handleRegister(): Promise<void> {
             >
               {{ $t('auth.inviteCode') }} <span class="text-red-500">*</span>
             </label>
-            <input v-model="form.inviteCode" type="text" class="input" :placeholder="$t('auth.inviteCodePlaceholder')" />
+            <input v-model="form.inviteCode" type="text" :class="ui.input" :placeholder="$t('auth.inviteCodePlaceholder')" />
           </div>
 
           <div>
@@ -382,7 +361,7 @@ async function handleRegister(): Promise<void> {
             >
               {{ $t('auth.username') }} <span class="text-red-500">*</span>
             </label>
-            <input v-model="form.username" type="text" class="input" :placeholder="$t('auth.usernameHint')" />
+            <input v-model="form.username" type="text" :class="ui.input" :placeholder="$t('auth.usernameHint')" />
           </div>
 
           <div>
@@ -397,18 +376,18 @@ async function handleRegister(): Promise<void> {
               <input 
                 v-model="emailUsername" 
                 type="text" 
-                class="input flex-1" 
+                :class="[ui.input, 'flex-1']"
                 :placeholder="$t('auth.emailUsernamePlaceholder')" 
               />
               <div class="flex items-center text-themed-muted">@</div>
-              <select v-model="selectedEmailDomain" class="input w-auto min-w-[140px]">
+              <select v-model="selectedEmailDomain" :class="[ui.select, 'w-auto min-w-[140px]']">
                 <option v-for="domain in allowedEmailDomains" :key="domain" :value="domain">
                   {{ domain }}
                 </option>
               </select>
             </div>
             <!-- 普通模式：完整邮箱输入 -->
-            <input v-else v-model="form.email" type="email" class="input" placeholder="your@email.com" />
+            <input v-else v-model="form.email" type="email" :class="ui.input" placeholder="your@email.com" />
           </div>
 
           <!-- Email Verification Code -->
@@ -423,7 +402,7 @@ async function handleRegister(): Promise<void> {
               <input 
                 v-model="form.emailCode" 
                 type="text" 
-                class="input flex-1" 
+                :class="[ui.input, 'flex-1']"
                 maxlength="6"
                 :placeholder="$t('auth.emailCodePlaceholder')" 
               />
@@ -461,7 +440,7 @@ async function handleRegister(): Promise<void> {
             >
               {{ $t('auth.password') }} <span class="text-red-500">*</span>
             </label>
-            <input v-model="form.password" type="password" class="input" :placeholder="$t('auth.passwordHint')" />
+            <input v-model="form.password" type="password" :class="ui.input" :placeholder="$t('auth.passwordHint')" />
           </div>
 
           <div>
@@ -471,7 +450,7 @@ async function handleRegister(): Promise<void> {
             >
               {{ $t('auth.confirmPassword') }} <span class="text-red-500">*</span>
             </label>
-            <input v-model="form.confirmPassword" type="password" class="input" :placeholder="$t('auth.confirmPasswordPlaceholder')" />
+            <input v-model="form.confirmPassword" type="password" :class="ui.input" :placeholder="$t('auth.confirmPasswordPlaceholder')" />
           </div>
 
           <!-- Turnstile 验证 -->
@@ -509,12 +488,12 @@ async function handleRegister(): Promise<void> {
             </label>
           </div>
 
-          <div v-if="error" class="text-sm text-red-500">{{ error }}</div>
+          <div v-if="error" class="rounded-xl px-4 py-3 text-sm leading-5" :class="ui.errorBanner" role="alert">{{ error }}</div>
 
           <button 
             type="submit" 
             :disabled="loading || (emailVerificationEnabled && !form.emailCode) || !agreedToTerms" 
-            class="btn-primary w-full"
+            :class="['inline-flex h-11 w-full items-center justify-center rounded-xl px-5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60', ui.filled]"
           >
             {{ loading ? $t('auth.creatingAccount') : $t('auth.createAccount') }}
           </button>
@@ -603,5 +582,5 @@ async function handleRegister(): Promise<void> {
         </svg>
       </button>
     </div>
-  </div>
+  </PublicAuthShell>
 </template>

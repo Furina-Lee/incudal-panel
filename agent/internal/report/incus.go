@@ -211,10 +211,11 @@ func incusRequest[T any](client *http.Client, path string) (T, error) {
 
 	metadataDecoder := json.NewDecoder(bytes.NewReader(envelope.Metadata))
 	metadataDecoder.UseNumber()
-	if err := metadataDecoder.Decode(&zero); err != nil {
+	var result T
+	if err := metadataDecoder.Decode(&result); err != nil {
 		return zero, err
 	}
-	return zero, nil
+	return result, nil
 }
 
 func buildIncusInstanceReportItem(client *http.Client, instance incusInstanceSummary) map[string]any {

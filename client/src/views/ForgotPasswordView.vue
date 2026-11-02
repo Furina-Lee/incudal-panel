@@ -6,13 +6,14 @@ import { useThemeStore } from '@/stores/theme'
 import { useToast } from '@/stores/toast'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
 import api from '@/api'
-import { useBrand } from '@/composables/useBrand'
+import PublicAuthShell from '@/components/public/PublicAuthShell.vue'
+import { useM3Auth } from '@/composables/useM3Auth'
 
 const router = useRouter()
 const { t } = useI18n()
 const themeStore = useThemeStore()
 const toast = useToast()
-const brand = useBrand()
+const { ui } = useM3Auth()
 
 const email = ref<string>('')
 const code = ref<string>('')
@@ -136,170 +137,143 @@ function backToEmail() {
 </script>
 
 <template>
-  <div 
-    class="min-h-screen flex items-center justify-center p-4"
-    :class="themeStore.isDark ? 'bg-[#0a0a0a]' : 'bg-gray-50'"
-  >
-    <div class="w-full max-w-sm">
-      <!-- Logo -->
-      <div class="text-center mb-8">
-        <img
-          :src="brand.brandLogoUrl"
-          :alt="brand.brandName"
-          class="w-16 h-16 mx-auto mb-2 rounded-xl"
+  <PublicAuthShell :title="$t('auth.forgotPassword.title')" :subtitle="$t('auth.forgotPassword.subtitle')">
+    <div class="w-full rounded-[28px] p-6 sm:p-8" :class="ui.card">
+      <!-- 步骤1：输入邮箱 -->
+      <form v-if="step === 'email'" class="space-y-4" @submit.prevent="sendVerificationCode">
+        <div>
+          <label
+            class="block text-sm mb-1.5"
+            :class="themeStore.isDark ? 'text-gray-400' : 'text-gray-600'"
+          >{{ $t('auth.email') }}</label>
+          <input
+            v-model="email"
+            type="email"
+            :class="ui.input"
+            :placeholder="$t('auth.emailPlaceholder')"
+            autocomplete="email"
+            required
+          />
+        </div>
+
+        <!-- Turnstile 验证 -->
+        <TurnstileWidget
+          v-if="turnstileEnabled && turnstileSiteKey"
+          ref="turnstileRef"
+          v-model="turnstileToken"
+          :site-key="turnstileSiteKey"
+          :theme="themeStore.isDark ? 'dark' : 'light'"
+          @expire="onTurnstileExpire"
         />
-        <h2 
-          class="text-lg font-semibold mb-1"
-          :class="themeStore.isDark ? 'text-gray-100' : 'text-gray-900'"
-        >
-          {{ $t('auth.forgotPassword.title') }}
-        </h2>
-        <p 
-          class="text-sm"
-          :class="themeStore.isDark ? 'text-gray-500' : 'text-gray-600'"
-        >
-          {{ $t('auth.forgotPassword.subtitle') }}
-        </p>
-      </div>
 
-      <!-- 表单 -->
-      <div class="card p-6">
-        <!-- 步骤1：输入邮箱 -->
-        <form v-if="step === 'email'" class="space-y-4" @submit.prevent="sendVerificationCode">
-          <div>
-            <label 
-              class="block text-sm mb-1.5"
-              :class="themeStore.isDark ? 'text-gray-400' : 'text-gray-600'"
-            >{{ $t('auth.email') }}</label>
-            <input
-              v-model="email"
-              type="email"
-              class="input"
-              :placeholder="$t('auth.emailPlaceholder')"
-              autocomplete="email"
-              required
-            />
-          </div>
+        <!-- 错误提示 -->
+        <div v-if="error" class="rounded-xl px-4 py-3 text-sm leading-5" :class="ui.errorBanner" role="alert">
+          {{ error }}
+        </div>
 
-          <!-- Turnstile 验证 -->
-          <TurnstileWidget
-            v-if="turnstileEnabled && turnstileSiteKey"
-            ref="turnstileRef"
-            v-model="turnstileToken"
-            :site-key="turnstileSiteKey"
-            :theme="themeStore.isDark ? 'dark' : 'light'"
-            @expire="onTurnstileExpire"
+        <!-- 成功提示 -->
+        <div v-if="success" class="text-sm text-green-500">
+          {{ success }}
+        </div>
+
+        <button
+          type="submit"
+          :disabled="sendingCode"
+          :class="['inline-flex h-11 w-full items-center justify-center rounded-xl px-5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60', ui.filled]"
+        >
+          {{ sendingCode ? $t('common.sending') : $t('auth.forgotPassword.sendCode') }}
+        </button>
+
+        <button
+          type="button"
+          :class="['inline-flex h-11 w-full items-center justify-center rounded-xl px-5 text-sm font-semibold transition-colors', ui.text]"
+          @click="router.push('/login')"
+        >
+          {{ $t('common.back') }}
+        </button>
+      </form>
+
+      <!-- 步骤2：验证码验证 -->
+      <form v-else class="space-y-4" @submit.prevent="resetPassword">
+        <div>
+          <label
+            class="block text-sm mb-1.5"
+            :class="themeStore.isDark ? 'text-gray-400' : 'text-gray-600'"
+          >{{ $t('auth.email') }}</label>
+          <input
+            :value="email"
+            type="email"
+            :class="ui.input"
+            disabled
           />
+        </div>
 
-          <!-- 错误提示 -->
-          <div v-if="error" class="text-sm text-red-500">
-            {{ error }}
-          </div>
-
-          <!-- 成功提示 -->
-          <div v-if="success" class="text-sm text-green-500">
-            {{ success }}
-          </div>
-
-          <button
-            type="submit"
-            :disabled="sendingCode"
-            class="btn-primary w-full"
-          >
-            {{ sendingCode ? $t('common.sending') : $t('auth.forgotPassword.sendCode') }}
-          </button>
-
-          <button
-            type="button"
-            class="btn-ghost w-full"
-            @click="router.push('/login')"
-          >
-            {{ $t('common.back') }}
-          </button>
-        </form>
-
-        <!-- 步骤2：验证码验证 -->
-        <form v-else class="space-y-4" @submit.prevent="resetPassword">
-          <div>
-            <label 
-              class="block text-sm mb-1.5"
-              :class="themeStore.isDark ? 'text-gray-400' : 'text-gray-600'"
-            >{{ $t('auth.email') }}</label>
-            <input
-              :value="email"
-              type="email"
-              class="input"
-              disabled
-            />
-          </div>
-
-          <div>
-            <label 
-              class="block text-sm mb-1.5"
-              :class="themeStore.isDark ? 'text-gray-400' : 'text-gray-600'"
-            >{{ $t('auth.verificationCode') }}</label>
-            <input
-              v-model="code"
-              type="text"
-              maxlength="6"
-              class="input"
-              :placeholder="$t('auth.verificationCodePlaceholder')"
-              autocomplete="one-time-code"
-              required
-            />
-            <p class="text-xs mt-1" :class="themeStore.isDark ? 'text-gray-500' : 'text-gray-500'">
-              {{ $t('auth.forgotPassword.codeHint') }}
-            </p>
-          </div>
-
-          <!-- Turnstile 验证 -->
-          <TurnstileWidget
-            v-if="turnstileEnabled && turnstileSiteKey"
-            ref="turnstileRef"
-            v-model="turnstileToken"
-            :site-key="turnstileSiteKey"
-            :theme="themeStore.isDark ? 'dark' : 'light'"
-            @expire="onTurnstileExpire"
+        <div>
+          <label
+            class="block text-sm mb-1.5"
+            :class="themeStore.isDark ? 'text-gray-400' : 'text-gray-600'"
+          >{{ $t('auth.verificationCode') }}</label>
+          <input
+            v-model="code"
+            type="text"
+            maxlength="6"
+            :class="ui.input"
+            :placeholder="$t('auth.verificationCodePlaceholder')"
+            autocomplete="one-time-code"
+            required
           />
+          <p class="text-xs mt-1" :class="themeStore.isDark ? 'text-gray-500' : 'text-gray-500'">
+            {{ $t('auth.forgotPassword.codeHint') }}
+          </p>
+        </div>
 
-          <!-- 错误提示 -->
-          <div v-if="error" class="text-sm text-red-500">
-            {{ error }}
-          </div>
+        <!-- Turnstile 验证 -->
+        <TurnstileWidget
+          v-if="turnstileEnabled && turnstileSiteKey"
+          ref="turnstileRef"
+          v-model="turnstileToken"
+          :site-key="turnstileSiteKey"
+          :theme="themeStore.isDark ? 'dark' : 'light'"
+          @expire="onTurnstileExpire"
+        />
 
-          <!-- 成功提示 -->
-          <div v-if="success" class="text-sm text-green-500">
-            {{ success }}
-          </div>
+        <!-- 错误提示 -->
+        <div v-if="error" class="rounded-xl px-4 py-3 text-sm leading-5" :class="ui.errorBanner" role="alert">
+          {{ error }}
+        </div>
 
-          <button
-            type="submit"
-            :disabled="loading"
-            class="btn-primary w-full"
-          >
-            {{ loading ? $t('common.processing') : $t('auth.forgotPassword.resetPassword') }}
-          </button>
+        <!-- 成功提示 -->
+        <div v-if="success" class="text-sm text-green-500">
+          {{ success }}
+        </div>
 
-          <button
-            type="button"
-            class="btn-ghost w-full"
-            @click="backToEmail"
-          >
-            {{ $t('common.back') }}
-          </button>
-        </form>
-      </div>
-
-      <p class="mt-6 text-center text-sm" :class="themeStore.isDark ? 'text-gray-600' : 'text-gray-500'">
-        {{ $t('auth.rememberPassword') }}
-        <RouterLink 
-          to="/login" 
-          class="transition-colors"
-          :class="themeStore.isDark ? 'text-gray-400 hover:text-gray-200' : 'text-gray-700 hover:text-gray-900'"
+        <button
+          type="submit"
+          :disabled="loading"
+          :class="['inline-flex h-11 w-full items-center justify-center rounded-xl px-5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60', ui.filled]"
         >
-          {{ $t('auth.login') }}
-        </RouterLink>
-      </p>
+          {{ loading ? $t('common.processing') : $t('auth.forgotPassword.resetPassword') }}
+        </button>
+
+        <button
+          type="button"
+          :class="['inline-flex h-11 w-full items-center justify-center rounded-xl px-5 text-sm font-semibold transition-colors', ui.text]"
+          @click="backToEmail"
+        >
+          {{ $t('common.back') }}
+        </button>
+      </form>
     </div>
-  </div>
+
+    <p class="mt-6 text-center text-sm" :class="themeStore.isDark ? 'text-gray-600' : 'text-gray-500'">
+      {{ $t('auth.rememberPassword') }}
+      <RouterLink
+        to="/login"
+        class="transition-colors"
+        :class="themeStore.isDark ? 'text-gray-400 hover:text-gray-200' : 'text-gray-700 hover:text-gray-900'"
+      >
+        {{ $t('auth.login') }}
+      </RouterLink>
+    </p>
+  </PublicAuthShell>
 </template>

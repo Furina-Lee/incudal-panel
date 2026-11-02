@@ -6,6 +6,7 @@ defineProps<{
   title: string
   subtitle?: string
   tone?: 'primary' | 'tertiary' | 'secondary'
+  wide?: boolean
 }>()
 
 const { ui } = useM3Auth()
@@ -13,7 +14,7 @@ const brand = useBrand()
 </script>
 
 <template>
-  <div class="mx-auto flex w-full max-w-lg flex-col items-center">
+  <div class="mx-auto flex w-full flex-col items-center" :class="wide ? 'max-w-4xl' : 'max-w-lg'">
     <section class="w-full">
       <div class="mb-8 text-center">
         <img
@@ -27,6 +28,9 @@ const brand = useBrand()
         >
           {{ title }}
         </h1>
+        <p v-if="subtitle" class="mx-auto mt-3 max-w-xl text-sm leading-6" :class="ui.body">
+          {{ subtitle }}
+        </p>
       </div>
 
       <slot />

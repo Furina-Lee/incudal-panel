@@ -10,6 +10,7 @@ declare module 'vue-router' {
     requiresAdmin?: boolean
     requiresUser?: boolean  // 仅普通用户可访问（禁止管理员）
     guest?: boolean
+    public?: boolean
     title?: string
     titleKey?: string
   }

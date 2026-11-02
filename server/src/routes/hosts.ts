@@ -7440,6 +7440,150 @@ export default async function hostRoutes(fastify: FastifyInstance) {
   })
 
   fastify.post<{
+    Params: { id: string }
+    Body: { instanceIds: number[] }
+  }>('/:id/ops/instances/audit/batch', {
+    onRequest: [fastify.authenticate]
+  }, async (request, reply) => {
+    const { user } = request
+    if (!await db.getSystemConfigBoolean('instance_audit_enabled', false)) {
+      return reply.code(403).send({
+        error: '实例审查功能已关闭，请先在系统配置中启用 instance_audit_enabled',
+        code: 'INSTANCE_AUDIT_DISABLED'
+      })
+    }
+
+    const hostId = Number(request.params.id)
+    if (!Number.isSafeInteger(hostId) || hostId <= 0) {
+      return reply.code(400).send(apiError(ErrorCode.INVALID_ID))
+    }
+    const { host, error, status } = await getAuthorizedOpsHost(hostId, user)
+    if (error || !host) return reply.code(status).send(error)
+
+    const instanceIds = request.body?.instanceIds
+    if (!Array.isArray(instanceIds) || instanceIds.length === 0 || instanceIds.length > 20 ||
+      instanceIds.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(instanceIds).size !== instanceIds.length) {
+      return reply.code(400).send({ error: 'instanceIds 必须包含 1 到 20 个不重复的正整数实例 ID' })
+    }
+
+    const results: Array<{
+      instanceId: number
+      name?: string
+      status: 'success' | 'failed'
+      scanId?: number
+      scannedAt?: string
+      summary?: ReturnType<typeof analyzeAuditData>['summary']
+      findings?: ReturnType<typeof analyzeAuditData>['findings']
+      error?: string
+    }> = new Array(instanceIds.length)
+    let nextIndex = 0
+
+    const scanOne = async (instanceId: number, index: number) => {
+      let instance: Awaited<ReturnType<typeof db.getInstanceById>> = null
+      try {
+        instance = await db.getInstanceById(instanceId)
+        if (!instance || instance.host_id !== hostId) {
+          results[index] = { instanceId, status: 'failed', error: '实例不存在或不属于该节点' }
+          return
+        }
+        const client = await getIncusClient(host as Host)
+        const { getInstance, getInstanceState, execWithOutput } = await import('../lib/incus/incus-instances.js')
+        const [state, incusInstance] = await Promise.all([
+          getInstanceState(client, instance.incus_id),
+          getInstance(client, instance.incus_id)
+        ]) as [{ status?: string }, { type?: string; status?: string }]
+        const incusStatus = state.status || incusInstance.status || ''
+        if (incusStatus !== 'Running') throw new Error(`实例未运行 (${incusStatus || instance.status})`)
+
+        const [processResult, connectionResult, startupResult] = await Promise.all([
+          execWithOutput(client, instance.incus_id, buildProcessAuditCommand(), {}, 45000),
+          execWithOutput(client, instance.incus_id, buildConnectionAuditCommand(), {}, 45000),
+          execWithOutput(client, instance.incus_id, buildStartupAuditCommand(), {}, 45000)
+        ])
+        const processes = parseProcesses(processResult.stdout)
+        const connections = parseConnections(connectionResult.stdout)
+        const startupItems = parseStartupItems(startupResult.stdout)
+        const [rules, ignores] = await Promise.all([
+          getAuditRuleDefinitions(hostId),
+          getAuditIgnores(hostId, instance.id)
+        ])
+        const analysis = analyzeAuditData({
+          processes,
+          connections,
+          startupItems,
+          rules,
+          ignores: ignores.map(ignore => ({
+            ...ignore,
+            targetType: normalizeAuditFindingTarget(ignore.targetType)
+          }))
+        })
+        const ignoredCount = analysis.findings.filter(finding => finding.ignored).length
+        const scan = await prisma.instanceAuditScan.create({
+          data: {
+            hostId,
+            instanceId: instance.id,
+            userId: user.id,
+            status: 'success',
+            capability: incusInstance.type === 'virtual-machine' ? 'guest-agent' : 'container-exec',
+            riskLevel: analysis.summary.riskLevel,
+            findingCount: analysis.summary.findingCount,
+            ignoredCount,
+            processCount: analysis.summary.processCount,
+            connectionCount: analysis.summary.connectionCount,
+            listeningCount: analysis.summary.listeningCount,
+            startupItemCount: analysis.summary.startupItemCount,
+            findings: analysis.findings.slice(0, 80) as any
+          }
+        })
+        await createLog(user.id, 'host', 'host.ops.audit.scan', `Ran manual audit scan for instance "${instance.name}" on host "${host.name}" (${analysis.summary.findingCount} finding(s))`, 'success', { instanceId: instance.id })
+        results[index] = {
+          instanceId: instance.id,
+          name: instance.name,
+          status: 'success',
+          scanId: scan.id,
+          scannedAt: new Date().toISOString(),
+          summary: analysis.summary,
+          findings: analysis.findings.slice(0, 80)
+        }
+      } catch (scanError) {
+        const message = (scanError instanceof Error ? scanError.message : String(scanError)).slice(0, 2000)
+        if (!instance) {
+          results[index] = { instanceId, status: 'failed', error: message }
+          return
+        }
+        const scan = await prisma.instanceAuditScan.create({
+          data: {
+            hostId,
+            instanceId: instance.id,
+            userId: user.id,
+            status: 'failed',
+            capability: 'unavailable',
+            riskLevel: 'info',
+            error: message
+          }
+        }).catch(() => null)
+        results[index] = {
+          instanceId: instance.id,
+          name: instance.name,
+          status: 'failed',
+          ...(scan ? { scanId: scan.id } : {}),
+          error: message
+        }
+        await createLog(user.id, 'host', 'host.ops.audit.scan', `Batch audit scan failed for instance "${instance.name}" on host "${host.name}": ${message}`, 'failed', { instanceId: instance.id }).catch(() => undefined)
+      }
+    }
+
+    const workers = Array.from({ length: Math.min(3, instanceIds.length) }, async () => {
+      while (nextIndex < instanceIds.length) {
+        const index = nextIndex++
+        await scanOne(instanceIds[index], index)
+      }
+    })
+    await Promise.all(workers)
+    return { success: results.every(result => result.status === 'success'), results }
+  })
+
+  fastify.post<{
     Params: { id: string; instanceId: string }
   }>('/:id/ops/instances/:instanceId/audit/scan', {
     onRequest: [fastify.authenticate]

@@ -107,8 +107,8 @@ interface ProtocolHeuristicRule {
 const PROTOCOL_HEURISTIC_RULES: ProtocolHeuristicRule[] = [
   {
     protocolCategory: 'shadowsocksr',
-    markers: [/shadowsocksr/i, /\bssr(?:-local|-server)?\b/i, /protocol(?:_param)?\s*[:=]/i],
-    confidence: 'high'
+    markers: [/shadowsocksr/i, /\bssr(?:-local|-server)?\b/i],
+    confidence: 'medium'
   },
   {
     protocolCategory: 'shadowsocks',
@@ -117,13 +117,13 @@ const PROTOCOL_HEURISTIC_RULES: ProtocolHeuristicRule[] = [
   },
   {
     protocolCategory: 'socks5',
-    markers: [/socks5?/i, /\b(sock[sd]|danted|3proxy)\b/i, /proxy[_-]?protocol\s*[:=]\s*socks/i],
+    markers: [/\bsocks5?\b/i, /\b(sock[sd]|danted|3proxy)\b/i, /proxy[_-]?protocol\s*[:=]\s*socks/i],
     confidence: 'medium'
   },
   {
     protocolCategory: 'trojan',
     markers: [/\btrojan(?:-go|rs)?\b/i, /\btrojan(?:s)?\s+(?:server|client)\b/i],
-    confidence: 'high'
+    confidence: 'medium'
   }
 ]
 
@@ -139,23 +139,23 @@ export function detectProxyProtocols(input: {
   connections?: Pick<AuditConnection, 'protocol' | 'process' | 'raw'>[]
 }): ProtocolHeuristicFinding[] {
   const evidence = [
-    ...(input.processes || []).map(item => `${item.command} ${item.args} ${item.raw}`),
-    ...(input.startupItems || []).map(item => `${item.command} ${item.raw}`),
-    ...(input.connections || []).map(item => `${item.protocol} ${item.process || ''} ${item.raw}`)
+    ...(input.processes || []).map(item => ({ kind: 'process', text: `${item.command} ${item.args} ${item.raw}` })),
+    ...(input.startupItems || []).map(item => ({ kind: 'startup', text: `${item.command} ${item.raw}` })),
+    ...(input.connections || []).map(item => ({ kind: 'connection', text: `${item.protocol} ${item.process || ''} ${item.raw}` }))
   ]
   const findings: ProtocolHeuristicFinding[] = []
   for (const rule of PROTOCOL_HEURISTIC_RULES) {
-    const matchedEvidence = evidence.find(text => rule.markers.some(marker => marker.test(text)))
-    if (!matchedEvidence) continue
-    const markerCount = rule.markers.filter(marker => evidence.some(text => marker.test(text))).length
-    const confidence = markerCount >= 2 ? 'high' : rule.confidence
+    const matches = evidence.filter(item => rule.markers.some(marker => marker.test(item.text)))
+    if (!matches.length) continue
+    const evidenceKinds = new Set(matches.map(item => item.kind))
+    const confidence = evidenceKinds.size >= 2 ? 'high' : rule.confidence
     findings.push({
       protocolCategory: rule.protocolCategory,
       confidence,
       confidenceNote: confidence === 'high'
-        ? '高置信度：实例内存在多个协议相关进程、启动项或网络证据标记，仍需结合业务配置人工确认。'
-        : '低置信度：仅命中单一实例内名称或文本标记，不能单独证明协议实际提供服务。',
-      evidence: matchedEvidence.slice(0, 800)
+        ? '高置信度：实例内存在跨进程、启动项或网络类别的协议相关证据标记，仍需结合业务配置人工确认。'
+        : '中置信度：仅命中单一类别的实例内协议标记，不能单独证明协议实际提供服务。',
+      evidence: matches[0].text.slice(0, 800)
     })
   }
   return findings.sort((a, b) => PROTOCOL_CONFIDENCE_RANK[b.confidence] - PROTOCOL_CONFIDENCE_RANK[a.confidence])

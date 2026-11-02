@@ -102,7 +102,9 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/',
-    redirect: { name: 'dashboard' }
+    name: 'portal',
+    component: () => import('@/views/PortalView.vue'),
+    meta: { public: true, titleKey: 'publicSite.seo.homeTitle', title: 'Home' }
   },
   {
     path: '/dashboard',
@@ -112,10 +114,9 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/market',
-    redirect: (to) => ({
-      name: 'instance-create',
-      query: to.query
-    })
+    name: 'market',
+    component: () => import('@/views/MarketView.vue'),
+    meta: { public: true, titleKey: 'publicSite.seo.marketTitle', title: 'Browse Products' }
   },
   {
     path: '/instances',
