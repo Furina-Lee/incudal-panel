@@ -7466,6 +7466,7 @@ export default async function hostRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'instanceIds 必须包含 1 到 20 个不重复的正整数实例 ID' })
     }
 
+    const protocolDetectionEnabled = await db.getSystemConfigBoolean('instance_audit_protocol_detection_enabled', true)
     const results: Array<{
       instanceId: number
       name?: string
@@ -7474,6 +7475,7 @@ export default async function hostRoutes(fastify: FastifyInstance) {
       scannedAt?: string
       summary?: ReturnType<typeof analyzeAuditData>['summary']
       findings?: ReturnType<typeof analyzeAuditData>['findings']
+      protocols?: ReturnType<typeof analyzeAuditData>['protocols']
       error?: string
     }> = new Array(instanceIds.length)
     let nextIndex = 0
@@ -7512,6 +7514,7 @@ export default async function hostRoutes(fastify: FastifyInstance) {
           connections,
           startupItems,
           rules,
+          protocolDetectionEnabled,
           ignores: ignores.map(ignore => ({
             ...ignore,
             targetType: normalizeAuditFindingTarget(ignore.targetType)
@@ -7543,7 +7546,8 @@ export default async function hostRoutes(fastify: FastifyInstance) {
           scanId: scan.id,
           scannedAt: new Date().toISOString(),
           summary: analysis.summary,
-          findings: analysis.findings.slice(0, 80)
+          findings: analysis.findings.slice(0, 80),
+          protocols: analysis.protocols
         }
       } catch (scanError) {
         const message = (scanError instanceof Error ? scanError.message : String(scanError)).slice(0, 2000)
@@ -7688,11 +7692,13 @@ export default async function hostRoutes(fastify: FastifyInstance) {
         getAuditRuleDefinitions(hostId),
         getAuditIgnores(hostId, instance.id)
       ])
+      const protocolDetectionEnabled = await db.getSystemConfigBoolean('instance_audit_protocol_detection_enabled', true)
       const analysis = analyzeAuditData({
         processes,
         connections,
         startupItems,
         rules,
+        protocolDetectionEnabled,
         ignores: ignores.map(ignore => ({
           ...ignore,
           targetType: normalizeAuditFindingTarget(ignore.targetType)
@@ -7754,6 +7760,7 @@ export default async function hostRoutes(fastify: FastifyInstance) {
           recommendation: rule.recommendation || null
         })),
         findings: analysis.findings,
+        protocols: analysis.protocols,
         processes: processes
           .sort((a, b) => b.findings.length - a.findings.length || (b.cpuPercent ?? 0) - (a.cpuPercent ?? 0))
           .slice(0, 200),

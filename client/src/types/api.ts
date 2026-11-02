@@ -560,11 +560,35 @@ export interface UpdateInstanceRequest {
   siteLimit?: number | null  // 0 = 不限制, null = 继承套餐
 }
 
+export type InstanceAuditProtocolCategory = 'shadowsocks' | 'shadowsocksr' | 'socks5' | 'trojan' | 'vless' | 'vmess' | 'quic' | 'anytls' | 'hy2' | 'tuic' | 'naiveproxy' | 'wireguard'
+
+export interface InstanceAuditListener {
+  protocol: string
+  state: string
+  local: string
+  peer: string
+  process: string | null
+  pid: number | null
+  port: number | null
+  raw: string
+}
+
+export interface InstanceAuditProtocolStatus {
+  protocolCategory: InstanceAuditProtocolCategory
+  detected: boolean
+  confidence?: 'low' | 'medium' | 'high'
+  confidenceNote?: string
+  observedPorts: number[]
+  observedPids: number[]
+  listeners: InstanceAuditListener[]
+  evidence?: string
+}
+
 export interface InstanceAuditFinding {
   id: string
   severity: 'info' | 'low' | 'medium' | 'high'
   category: string
-  protocolCategory?: string | null
+  protocolCategory?: InstanceAuditProtocolCategory | null
   title: string
   detail: string
   targetType: 'process' | 'network' | 'startup' | 'capability'
@@ -575,7 +599,10 @@ export interface InstanceAuditFinding {
   recommendation?: string | null
   pid?: number
   evidence: string
-  confidence?: number | string | null
+  confidence?: 'low' | 'medium' | 'high' | null
+  confidenceNote?: string
+  observedPorts?: number[]
+  observedPids?: number[]
   ignored?: boolean
   ignoreReason?: string | null
 }
@@ -597,6 +624,7 @@ export interface InstanceAuditBatchResult {
       findingCount?: number
     }
     findings?: InstanceAuditFinding[]
+    protocols?: InstanceAuditProtocolStatus[]
     error?: string
   }>
 }

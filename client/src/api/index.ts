@@ -1719,6 +1719,16 @@ const api = {
         recommendation?: string | null
         enabled: boolean
       }>
+      protocols: Array<{
+        protocolCategory: 'shadowsocks' | 'shadowsocksr' | 'socks5' | 'trojan' | 'vless' | 'vmess' | 'quic' | 'anytls' | 'hy2' | 'tuic' | 'naiveproxy' | 'wireguard'
+        detected: boolean
+        confidence?: 'low' | 'medium' | 'high'
+        confidenceNote?: string
+        observedPorts: number[]
+        observedPids: number[]
+        listeners: Array<{ protocol: string; state: string; local: string; peer: string; process: string | null; pid: number | null; port: number | null; raw: string }>
+        evidence?: string
+      }>
       findings: Array<{
         id: string
         severity: 'info' | 'low' | 'medium' | 'high'
@@ -1733,6 +1743,11 @@ const api = {
         recommendation?: string | null
         pid?: number
         evidence: string
+        protocolCategory?: 'shadowsocks' | 'shadowsocksr' | 'socks5' | 'trojan' | 'vless' | 'vmess' | 'quic' | 'anytls' | 'hy2' | 'tuic' | 'naiveproxy' | 'wireguard'
+        observedPorts?: number[]
+        observedPids?: number[]
+        confidence?: 'low' | 'medium' | 'high'
+        confidenceNote?: string
         ignored?: boolean
         ignoreReason?: string | null
       }>
@@ -1754,6 +1769,8 @@ const api = {
         state: string
         local: string
         peer: string
+        localPort?: number | null
+        peerPort?: number | null
         process: string | null
         pid: number | null
         raw: string

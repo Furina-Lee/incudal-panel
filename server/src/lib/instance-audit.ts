@@ -3,7 +3,7 @@ export type AuditFindingTarget = 'process' | 'network' | 'startup' | 'capability
 export type AuditRuleTarget = 'process' | 'network' | 'startup'
 export type AuditRuleMatchType = 'contains' | 'regex' | 'exact'
 export type AuditRuleSource = 'builtin' | 'custom'
-export type AuditProtocolCategory = 'shadowsocks' | 'shadowsocksr' | 'socks5' | 'trojan'
+export type AuditProtocolCategory = 'shadowsocks' | 'shadowsocksr' | 'socks5' | 'trojan' | 'vless' | 'vmess' | 'quic' | 'anytls' | 'hy2' | 'tuic' | 'naiveproxy' | 'wireguard'
 export type AuditProtocolConfidence = 'low' | 'medium' | 'high'
 
 export interface AuditProcess {
@@ -25,6 +25,8 @@ export interface AuditConnection {
   state: string
   local: string
   peer: string
+  localPort: number | null
+  peerPort: number | null
   process: string | null
   pid: number | null
   raw: string
@@ -54,6 +56,8 @@ export interface AuditFinding {
   protocolCategory?: AuditProtocolCategory
   confidence?: AuditProtocolConfidence
   confidenceNote?: string
+  observedPorts?: number[]
+  observedPids?: number[]
   ignored?: boolean
   ignoreReason?: string | null
 }
@@ -91,11 +95,36 @@ export interface AuditIgnoreDefinition {
   expiresAt?: Date | string | null
 }
 
+export interface ProtocolListenerEvidence {
+  protocol: string
+  state: string
+  local: string
+  peer: string
+  process: string | null
+  pid: number | null
+  port: number | null
+  raw: string
+}
+
 export interface ProtocolHeuristicFinding {
   protocolCategory: AuditProtocolCategory
   confidence: AuditProtocolConfidence
   confidenceNote: string
   evidence: string
+  observedPorts: number[]
+  observedPids: number[]
+  listeners: ProtocolListenerEvidence[]
+}
+
+export interface ProtocolAuditStatus {
+  protocolCategory: AuditProtocolCategory
+  detected: boolean
+  confidence?: AuditProtocolConfidence
+  confidenceNote?: string
+  observedPorts: number[]
+  observedPids: number[]
+  listeners: ProtocolListenerEvidence[]
+  evidence?: string
 }
 
 interface ProtocolHeuristicRule {
@@ -105,57 +134,76 @@ interface ProtocolHeuristicRule {
 }
 
 const PROTOCOL_HEURISTIC_RULES: ProtocolHeuristicRule[] = [
-  {
-    protocolCategory: 'shadowsocksr',
-    markers: [/shadowsocksr/i, /\bssr(?:-local|-server)?\b/i],
-    confidence: 'medium'
-  },
-  {
-    protocolCategory: 'shadowsocks',
-    markers: [/shadowsocks/i, /\bss(?:-local|-server|server|local)?\b/i, /\bchacha20|aes-\d+(-gcm)?|2022-blake3\b/i],
-    confidence: 'medium'
-  },
-  {
-    protocolCategory: 'socks5',
-    markers: [/\bsocks5?\b/i, /\b(sock[sd]|danted|3proxy)\b/i, /proxy[_-]?protocol\s*[:=]\s*socks/i],
-    confidence: 'medium'
-  },
-  {
-    protocolCategory: 'trojan',
-    markers: [/\btrojan(?:-go|rs)?\b/i, /\btrojan(?:s)?\s+(?:server|client)\b/i],
-    confidence: 'medium'
-  }
+  { protocolCategory: 'shadowsocksr', markers: [/\bshadowsocksr\b/i, /\bssr(?:-local|-server)?\b/i], confidence: 'medium' },
+  { protocolCategory: 'shadowsocks', markers: [/(?<!r)\bshadowsocks\b/i, /\bss-(?:local|server)\b/i, /(?:protocol|method)\s*[:=]\s*['"]?shadowsocks\b/i], confidence: 'medium' },
+  { protocolCategory: 'socks5', markers: [/\bsocks5?\b/i, /\b(?:sockd|danted|3proxy)\b/i, /proxy[_-]?protocol\s*[:=]\s*socks/i], confidence: 'medium' },
+  { protocolCategory: 'trojan', markers: [/\btrojan(?:-go|rs)?\b/i, /\btrojan(?:s)?\s+(?:server|client)\b/i], confidence: 'medium' },
+  { protocolCategory: 'vless', markers: [/\bvless:\/\//i, /(?:protocol|type|network)\s*[:=]\s*['"]?vless\b/i, /\bvless(?:-tcp|-ws|-grpc|-httpupgrade|-xhttp)?\b/i], confidence: 'medium' },
+  { protocolCategory: 'vmess', markers: [/\bvmess:\/\//i, /(?:protocol|type|network)\s*[:=]\s*['"]?vmess\b/i, /\bvmess(?:-tcp|-ws|-grpc|-quic)?\b/i], confidence: 'medium' },
+  { protocolCategory: 'anytls', markers: [/\bany[-_]?tls:\/\//i, /(?:protocol|type|network)\s*[:=]\s*['"]?any[-_]?tls\b/i, /\bany[-_]?tls\b/i], confidence: 'medium' },
+  { protocolCategory: 'hy2', markers: [/\bhysteria2?:\/\//i, /(?:protocol|type)\s*[:=]\s*['"]?hysteria2?\b/i, /\b(?:hysteria2?|hy2)-(?:server|client)\b/i], confidence: 'medium' },
+  { protocolCategory: 'quic', markers: [/(?:network|transport|type)\s*[:=]\s*['"]?(?:quic|http3|h3)\b/i, /\b(?:quic|http3|h3)-(?:server|client)\b/i], confidence: 'low' },
+  { protocolCategory: 'tuic', markers: [/\btuic(?:-v5)?:\/\//i, /(?:protocol|type)\s*[:=]\s*['"]?tuic\b/i, /\btuic(?:-v5)?-(?:server|client)\b/i], confidence: 'medium' },
+  { protocolCategory: 'naiveproxy', markers: [/\bnaiveproxy\b/i, /\bnaive-server\b/i], confidence: 'medium' },
+  { protocolCategory: 'wireguard', markers: [/\bwireguard\b/i, /\bwg[-_]quick\b/i], confidence: 'medium' }
 ]
 
+const PROTOCOL_CATEGORIES = PROTOCOL_HEURISTIC_RULES.map(rule => rule.protocolCategory)
 const PROTOCOL_CONFIDENCE_RANK: Record<AuditProtocolConfidence, number> = { low: 0, medium: 1, high: 2 }
 
-/**
- * Detect protocol-like markers from instance-local evidence only.
- * This is intentionally heuristic: names/configuration/connection text do not prove protocol use.
- */
+export function extractEndpointPort(endpoint: string): number | null {
+  const value = endpoint.trim()
+  const match = value.match(/^\[.*\]:(\d+)$/) || value.match(/:(\d+)$/)
+  if (!match) return null
+  const port = Number(match[1])
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null
+}
+
+function isListener(connection: AuditConnection): boolean {
+  const protocol = connection.protocol.toLowerCase()
+  const state = connection.state.toUpperCase()
+  return state === 'LISTEN' || (protocol.startsWith('udp') && state === 'UNCONN')
+}
+
 export function detectProxyProtocols(input: {
-  processes?: Pick<AuditProcess, 'command' | 'args' | 'raw'>[]
+  processes?: Pick<AuditProcess, 'pid' | 'command' | 'args' | 'raw'>[]
   startupItems?: Pick<AuditStartupItem, 'command' | 'raw'>[]
-  connections?: Pick<AuditConnection, 'protocol' | 'process' | 'raw'>[]
+  connections?: AuditConnection[]
 }): ProtocolHeuristicFinding[] {
-  const evidence = [
-    ...(input.processes || []).map(item => ({ kind: 'process', text: `${item.command} ${item.args} ${item.raw}` })),
-    ...(input.startupItems || []).map(item => ({ kind: 'startup', text: `${item.command} ${item.raw}` })),
-    ...(input.connections || []).map(item => ({ kind: 'connection', text: `${item.protocol} ${item.process || ''} ${item.raw}` }))
-  ]
+  const processEvidence = (input.processes || []).map(item => ({ kind: 'process', pid: item.pid, text: `${item.command} ${item.args} ${item.raw}` }))
+  const startupEvidence = (input.startupItems || []).map(item => ({ kind: 'startup', pid: null, text: `${item.command} ${item.raw}` }))
+  const connectionEvidence = (input.connections || []).map(item => ({ kind: 'connection', pid: item.pid, text: `${item.protocol} ${item.process || ''} ${item.raw}`, connection: item }))
   const findings: ProtocolHeuristicFinding[] = []
   for (const rule of PROTOCOL_HEURISTIC_RULES) {
-    const matches = evidence.filter(item => rule.markers.some(marker => marker.test(item.text)))
+    const matches = [...processEvidence, ...startupEvidence, ...connectionEvidence].filter(item => rule.markers.some(marker => marker.test(item.text)))
     if (!matches.length) continue
     const evidenceKinds = new Set(matches.map(item => item.kind))
-    const confidence = evidenceKinds.size >= 2 ? 'high' : rule.confidence
+    const matchedPids = [...new Set(matches.map(item => item.pid).filter((pid): pid is number => Number.isInteger(pid)))]
+    const listeners = connectionEvidence
+      .filter(item => matches.includes(item) || (item.connection.pid !== null && matchedPids.includes(item.connection.pid)))
+      .filter(item => isListener(item.connection))
+      .map(item => ({
+        protocol: item.connection.protocol,
+        state: item.connection.state,
+        local: item.connection.local,
+        peer: item.connection.peer,
+        process: item.connection.process,
+        pid: item.connection.pid,
+        port: item.connection.localPort,
+        raw: item.connection.raw
+      }))
+    const observedPorts = [...new Set(listeners.map(listener => listener.port).filter((port): port is number => port !== null))].sort((a, b) => a - b)
+    const confidence = evidenceKinds.size >= 2 && (matchedPids.length > 0 || listeners.length > 0) ? 'high' : rule.confidence
     findings.push({
       protocolCategory: rule.protocolCategory,
       confidence,
       confidenceNote: confidence === 'high'
-        ? '高置信度：实例内存在跨进程、启动项或网络类别的协议相关证据标记，仍需结合业务配置人工确认。'
-        : '中置信度：仅命中单一类别的实例内协议标记，不能单独证明协议实际提供服务。',
-      evidence: matches[0].text.slice(0, 800)
+        ? '高置信度：协议标记与同一进程或观察到的监听端点存在关联，仍需人工确认配置和业务用途。'
+        : '启发式线索：命中了实例内协议标记，端口仅为观测信息，不能单独证明协议实际提供服务。',
+      evidence: [...matches.slice(0, 2).map(item => item.text), ...listeners.slice(0, 3).map(listener => listener.raw)].join('\n').slice(0, 800),
+      observedPorts,
+      observedPids: matchedPids,
+      listeners
     })
   }
   return findings.sort((a, b) => PROTOCOL_CONFIDENCE_RANK[b.confidence] - PROTOCOL_CONFIDENCE_RANK[a.confidence])
@@ -301,26 +349,35 @@ export function parseProcesses(output: string, limit = 300): AuditProcess[] {
 }
 
 function parsePidFromProcessColumn(value: string): number | null {
-  const match = value.match(/\bpid=(\d+)/)
+  const match = value.match(/\bpid=(\d+)/) || value.match(/(?:^|\s)(\d+)\//)
   if (!match) return null
   const pid = Number(match[1])
   return Number.isInteger(pid) ? pid : null
 }
 
+const CONNECTION_STATES = new Set(['LISTEN', 'UNCONN', 'ESTABLISHED', 'SYN-SENT', 'SYN-RECV', 'FIN-WAIT-1', 'FIN-WAIT-2', 'TIME-WAIT', 'CLOSE', 'CLOSE-WAIT', 'LAST-ACK', 'CLOSING', 'UNKNOWN'])
+
 export function parseConnections(output: string, limit = 300): AuditConnection[] {
   const rows: AuditConnection[] = []
   for (const rawLine of output.split(/\r?\n/)) {
     const raw = rawLine.trim()
-    if (!raw) continue
+    if (!raw || /^(proto|netid)\b/i.test(raw)) continue
     const fields = raw.split(/\s+/)
     if (fields.length < 5) continue
 
-    const processText = fields.length > 6 ? fields.slice(6).join(' ') : null
+    const isSsLayout = CONNECTION_STATES.has((fields[1] || '').toUpperCase())
+    const protocol = fields[0] || ''
+    const state = isSsLayout ? fields[1] || '' : fields[5] || ''
+    const local = isSsLayout ? fields[4] || '' : fields[3] || ''
+    const peer = isSsLayout ? fields[5] || '' : fields[4] || ''
+    const processText = isSsLayout ? (fields.length > 6 ? fields.slice(6).join(' ') : null) : (fields.length > 6 ? fields.slice(6).join(' ') : null)
     rows.push({
-      protocol: fields[0] || '',
-      state: fields[1] || '',
-      local: fields[4] || '',
-      peer: fields[5] || '',
+      protocol,
+      state,
+      local,
+      peer,
+      localPort: extractEndpointPort(local),
+      peerPort: extractEndpointPort(peer),
       process: processText,
       pid: processText ? parsePidFromProcessColumn(processText) : null,
       raw
@@ -453,7 +510,8 @@ export function analyzeAuditData(input: {
   startupItems: AuditStartupItem[]
   rules?: AuditRuleDefinition[]
   ignores?: AuditIgnoreDefinition[]
-}): { findings: AuditFinding[]; summary: AuditSummary } {
+  protocolDetectionEnabled?: boolean
+}): { findings: AuditFinding[]; summary: AuditSummary; protocols: ProtocolAuditStatus[] } {
   const findings: AuditFinding[] = []
   const now = new Date()
   const rules = (input.rules?.length ? input.rules : BUILTIN_AUDIT_RULES).filter(rule => rule.enabled)
@@ -509,7 +567,7 @@ export function analyzeAuditData(input: {
     }
   })
 
-  const protocolFindings = detectProxyProtocols(input)
+  const protocolFindings = input.protocolDetectionEnabled === false ? [] : detectProxyProtocols(input)
   protocolFindings.forEach((protocolFinding, index) => {
     findings.push({
       id: `protocol-${index}-${protocolFinding.protocolCategory}`,
@@ -521,8 +579,17 @@ export function analyzeAuditData(input: {
       protocolCategory: protocolFinding.protocolCategory,
       confidence: protocolFinding.confidence,
       confidenceNote: protocolFinding.confidenceNote,
-      evidence: protocolFinding.evidence
+      evidence: protocolFinding.evidence,
+      observedPorts: protocolFinding.observedPorts,
+      observedPids: protocolFinding.observedPids
     })
+  })
+
+  const protocols = PROTOCOL_CATEGORIES.map(protocolCategory => {
+    const finding = protocolFindings.find(item => item.protocolCategory === protocolCategory)
+    return finding
+      ? { protocolCategory, detected: true, confidence: finding.confidence, confidenceNote: finding.confidenceNote, observedPorts: finding.observedPorts, observedPids: finding.observedPids, listeners: finding.listeners, evidence: finding.evidence }
+      : { protocolCategory, detected: false, observedPorts: [], observedPids: [], listeners: [] }
   })
 
   const udpConnections = input.connections.filter(row => /^udp/i.test(row.protocol)).length
@@ -565,7 +632,8 @@ export function analyzeAuditData(input: {
       listeningCount,
       startupItemCount: input.startupItems.length,
       findingCount: activeFindings.length
-    }
+    },
+    protocols
   }
 }
 

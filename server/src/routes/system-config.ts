@@ -257,6 +257,7 @@ export default async function systemConfigRoutes(fastify: FastifyInstance) {
             'invite_default_expire_days',
             'hosting_feature_enabled',
             'instance_audit_enabled',
+            'instance_audit_protocol_detection_enabled',
             'hosting_market_entry_enabled',
             'hosting_notice',
             'ticket_enabled',
@@ -315,7 +316,7 @@ export default async function systemConfigRoutes(fastify: FastifyInstance) {
         ]
 
         // 布尔类型配置键
-        const booleanKeys = ['registration_enabled', 'require_invite_code', 'hosting_feature_enabled', 'instance_audit_enabled', 'hosting_market_entry_enabled', 'ticket_enabled', 'free_site_mode', 'free_site_register_gift_enabled', 'turnstile_enabled', 'telegram_bot_enabled', 'telegram_group_join_enabled', 'telegram_vip_group_join_enabled', 'smtp_enabled', 'smtp_secure', 'email_domain_whitelist_enabled']
+        const booleanKeys = ['registration_enabled', 'require_invite_code', 'hosting_feature_enabled', 'instance_audit_enabled', 'instance_audit_protocol_detection_enabled', 'hosting_market_entry_enabled', 'ticket_enabled', 'free_site_mode', 'free_site_register_gift_enabled', 'turnstile_enabled', 'telegram_bot_enabled', 'telegram_group_join_enabled', 'telegram_vip_group_join_enabled', 'smtp_enabled', 'smtp_secure', 'email_domain_whitelist_enabled']
         // 字符串类型配置键
         const stringKeys = [
             'turnstile_site_key',

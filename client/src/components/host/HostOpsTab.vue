@@ -145,6 +145,30 @@ interface AvailableInitCommand {
 
 type AuditSeverity = 'info' | 'low' | 'medium' | 'high'
 
+type InstanceAuditProtocolCategory = 'shadowsocks' | 'shadowsocksr' | 'socks5' | 'trojan' | 'vless' | 'vmess' | 'quic' | 'anytls' | 'hy2' | 'tuic' | 'naiveproxy' | 'wireguard'
+
+interface InstanceAuditListener {
+  protocol: string
+  state: string
+  local: string
+  peer: string
+  process: string | null
+  pid: number | null
+  port: number | null
+  raw: string
+}
+
+interface InstanceAuditProtocolStatus {
+  protocolCategory: InstanceAuditProtocolCategory
+  detected: boolean
+  confidence?: 'low' | 'medium' | 'high'
+  confidenceNote?: string
+  observedPorts: number[]
+  observedPids: number[]
+  listeners: InstanceAuditListener[]
+  evidence?: string
+}
+
 interface InstanceAuditFinding {
   id: string
   severity: AuditSeverity
@@ -159,8 +183,11 @@ interface InstanceAuditFinding {
   recommendation?: string | null
   pid?: number
   evidence: string
-  protocolCategory?: string | null
-  confidence?: number | string | null
+  protocolCategory?: InstanceAuditProtocolCategory | null
+  confidence?: 'low' | 'medium' | 'high' | null
+  confidenceNote?: string
+  observedPorts?: number[]
+  observedPids?: number[]
   ignored?: boolean
   ignoreReason?: string | null
 }
@@ -184,6 +211,8 @@ interface InstanceAuditConnection {
   state: string
   local: string
   peer: string
+  localPort?: number | null
+  peerPort?: number | null
   process: string | null
   pid: number | null
   raw: string
@@ -219,6 +248,7 @@ interface InstanceAuditResult {
   ignoredCount?: number
   rules?: InstanceAuditRule[]
   findings: InstanceAuditFinding[]
+  protocols: InstanceAuditProtocolStatus[]
   processes: InstanceAuditProcess[]
   connections: InstanceAuditConnection[]
   startupItems: InstanceAuditStartupItem[]
@@ -302,10 +332,11 @@ const auditRules = ref<InstanceAuditRule[]>([])
 const auditIgnores = ref<InstanceAuditIgnore[]>([])
 const auditHistory = ref<InstanceAuditHistory>({ scans: [], actions: [] })
 const auditEnabled = ref(false)
+const auditProtocolDetectionEnabled = ref(true)
 const loadingAuditConfig = ref(false)
 const selectedAuditInstanceIds = ref<number[]>([])
 const batchAuditProgress = ref({ current: 0, total: 0 })
-const batchAuditResults = ref<Array<{ instanceId: number; instanceName?: string; success: boolean; summary?: { riskLevel?: AuditSeverity; findingCount?: number; processCount?: number; connectionCount?: number; listeningCount?: number }; findings?: InstanceAuditFinding[]; error?: string }>>([])
+const batchAuditResults = ref<Array<{ instanceId: number; instanceName?: string; success: boolean; summary?: { riskLevel?: AuditSeverity; findingCount?: number; processCount?: number; connectionCount?: number; listeningCount?: number }; protocols?: InstanceAuditProtocolStatus[]; findings?: InstanceAuditFinding[]; error?: string }>>([])
 const auditTrafficRate = ref<{ rx: number; tx: number } | null>(null)
 let trafficSampleTimer: ReturnType<typeof setInterval> | null = null
 let lastTrafficSample: { rx: number; tx: number; time: number } | null = null
@@ -367,7 +398,9 @@ async function loadAuditEnabled() {
   try {
     const { configs } = await api.systemConfig.list()
     const setting = configs.find(config => config.key === 'instance_audit_enabled')
+    const protocolSetting = configs.find(config => config.key === 'instance_audit_protocol_detection_enabled')
     auditEnabled.value = setting?.value === 'true'
+    auditProtocolDetectionEnabled.value = protocolSetting ? protocolSetting.value === 'true' : true
   } catch (err: any) {
     toast.error('读取审查开关失败: ' + (err?.message || String(err)))
   } finally {
@@ -386,6 +419,26 @@ async function toggleAuditEnabled() {
     toast.success(next ? '实例审查已启用' : '实例审查已停用')
   } catch (err: any) {
     toast.error('更新审查开关失败: ' + (err?.message || String(err)))
+  } finally {
+    loadingAuditConfig.value = false
+  }
+}
+
+async function toggleAuditProtocolDetection() {
+  if (loadingAuditConfig.value) return
+  const next = !auditProtocolDetectionEnabled.value
+  loadingAuditConfig.value = true
+  try {
+    await api.systemConfig.update([{ key: 'instance_audit_protocol_detection_enabled', value: String(next) }])
+    auditProtocolDetectionEnabled.value = next
+    if (!next) {
+      auditResult.value = null
+      batchAuditResults.value = []
+      resetTrafficSamples()
+    }
+    toast.success(next ? '协议识别已启用' : '协议识别已停用')
+  } catch (err: any) {
+    toast.error('更新协议识别开关失败: ' + (err?.message || String(err)))
   } finally {
     loadingAuditConfig.value = false
   }
@@ -675,6 +728,18 @@ function localizeAuditCategory(category?: string): string {
     'credential-attack': '凭据攻击',
     'network-anomaly': '网络异常',
     'resource-anomaly': '资源异常',
+    shadowsocks: 'Shadowsocks',
+    shadowsocksr: 'ShadowsocksR',
+    socks5: 'SOCKS5',
+    trojan: 'Trojan',
+    vless: 'VLESS',
+    vmess: 'VMess',
+    quic: 'QUIC/HTTP3',
+    anytls: 'AnyTLS',
+    hy2: 'Hysteria/Hy2',
+    tuic: 'TUIC',
+    naiveproxy: 'NaiveProxy',
+    wireguard: 'WireGuard',
     custom: '自定义'
   }
   return category ? (map[category] || category) : '-'
@@ -1679,7 +1744,11 @@ async function runAuditKillProcess() {
           <div class="flex flex-wrap items-center gap-2">
             <label class="inline-flex items-center gap-2 text-sm text-themed-muted">
               <input type="checkbox" :checked="auditEnabled" :disabled="loadingAuditConfig" @change="toggleAuditEnabled" />
-              审查启用
+              实例审查
+            </label>
+            <label class="inline-flex items-center gap-2 text-sm text-themed-muted" title="关闭后仍运行普通审查规则，但不执行代理协议启发式识别">
+              <input type="checkbox" :checked="auditProtocolDetectionEnabled" :disabled="loadingAuditConfig" @change="toggleAuditProtocolDetection" />
+              协议识别
             </label>
             <button class="btn-secondary btn-sm" :disabled="loadingAction !== ''" @click="runDiscover">
               {{ loadingAction === 'discover' ? '...' : '刷新实例列表' }}
@@ -1689,6 +1758,9 @@ async function runAuditKillProcess() {
 
         <div v-if="!auditEnabled" class="rounded-lg border p-3 text-sm text-amber-600" :class="themeStore.isDark ? 'border-amber-900 bg-amber-950/20' : 'border-amber-200 bg-amber-50'">
           实例审查当前已关闭。启用后才可执行单实例或批量扫描。
+        </div>
+        <div v-else-if="!auditProtocolDetectionEnabled" class="rounded-lg border p-3 text-sm text-themed-muted" :class="themeStore.isDark ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-gray-50'">
+          协议识别已关闭。进程、网络和启动项审查仍会运行，但不会生成 Shadowsocks、ShadowsocksR、SOCKS5 或 Trojan 的协议启发式发现。
         </div>
         <div v-if="discoverResult" class="grid gap-4 xl:grid-cols-[minmax(260px,360px)_1fr]">
           <div class="rounded-xl border p-4 space-y-3 min-w-0" :class="themeStore.isDark ? 'border-gray-800' : 'border-gray-200'">
@@ -1740,8 +1812,27 @@ async function runAuditKillProcess() {
               <div v-for="row in batchAuditResults" :key="row.instanceId" class="rounded-lg border p-3 text-sm min-w-0" :class="themeStore.isDark ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-gray-50'">
                 <div class="flex flex-wrap justify-between gap-2"><span class="font-medium text-themed break-all">{{ row.instanceName || `#${row.instanceId}` }}</span><span :class="row.success ? 'text-emerald-500' : 'text-red-500'">{{ row.success ? '成功' : '失败' }}</span></div>
                 <div v-if="row.summary" class="text-xs text-themed-muted mt-1">风险 {{ row.summary.riskLevel ? localizeSeverity(row.summary.riskLevel) : '-' }} · 发现 {{ row.summary.findingCount ?? 0 }} · 连接 {{ row.summary.connectionCount ?? 0 }} · 监听 {{ row.summary.listeningCount ?? 0 }}</div>
+                <div v-if="row.protocols?.some(protocol => protocol.detected)" class="mt-2 flex flex-wrap gap-1.5"> <span v-for="protocol in row.protocols.filter(item => item.detected)" :key="protocol.protocolCategory" class="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-500">{{ localizeAuditCategory(protocol.protocolCategory) }}{{ protocol.observedPorts.length ? ` · ${protocol.observedPorts.join(',')}` : '' }}</span></div>
+                <div v-else-if="row.protocols" class="text-xs text-themed-muted mt-2">未发现协议线索</div>
                 <div v-if="row.error" class="text-xs text-red-500 mt-1 break-words">{{ row.error }}</div>
-                <div v-for="finding in row.findings || []" :key="finding.id" class="text-xs text-themed-muted mt-2 break-words">{{ localizeAuditCategory(finding.protocolCategory || finding.category) }} · {{ localizeAuditText(finding.title) }} · {{ finding.confidence ?? '—' }} · {{ finding.evidence }}</div>
+                <div v-for="finding in row.findings || []" :key="finding.id" class="text-xs text-themed-muted mt-2 break-words">{{ localizeAuditCategory(finding.protocolCategory || finding.category) }} · {{ localizeAuditText(finding.title) }} · {{ finding.confidence ?? '—' }}<span v-if="finding.observedPorts?.length"> · 端口 {{ finding.observedPorts.join(', ') }}</span> · {{ finding.evidence }}</div>
+              </div>
+            </div>
+
+            <div v-if="auditResult" class="rounded-xl border p-4 space-y-3" :class="themeStore.isDark ? 'border-gray-800 bg-gray-900/50' : 'border-gray-200 bg-gray-50'">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 class="text-sm font-semibold text-themed">协议审计</h3>
+                  <p class="text-xs text-themed-muted mt-1">仅基于实例内进程、启动项和连接标记的启发式线索，不代表协议已被确证。</p>
+                </div>
+                <span class="text-xs text-themed-muted">{{ auditResult.protocols?.some(item => item.detected) ? '发现疑似协议' : '未发现协议线索' }}</span>
+              </div>
+              <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                <div v-for="protocol in (auditResult.protocols || [])" :key="protocol.protocolCategory" class="rounded-lg border px-3 py-2" :class="protocol.detected ? (themeStore.isDark ? 'border-amber-800 bg-amber-950/20' : 'border-amber-200 bg-amber-50') : (themeStore.isDark ? 'border-gray-800 bg-gray-950' : 'border-gray-200 bg-white')">
+                  <div class="flex items-center justify-between gap-2"><span class="font-medium text-themed">{{ localizeAuditCategory(protocol.protocolCategory) }}</span><span class="text-xs" :class="protocol.detected ? 'text-amber-500' : 'text-themed-muted'">{{ protocol.detected ? (protocol.confidence || '疑似') : '未发现' }}</span></div>
+                  <div v-if="protocol.detected" class="mt-1 text-xs text-themed-muted">端口：{{ protocol.observedPorts.length ? protocol.observedPorts.join(', ') : '未关联端口' }} · PID：{{ protocol.observedPids.length ? protocol.observedPids.join(', ') : '未关联' }}</div>
+                  <div v-if="protocol.detected && protocol.confidenceNote" class="mt-1 text-xs text-themed-muted">{{ protocol.confidenceNote }}</div>
+                </div>
               </div>
             </div>
 
@@ -1794,7 +1885,7 @@ async function runAuditKillProcess() {
               <div class="text-xs text-themed-muted mt-1">{{ localizeFindingDetail(finding.detail) }}</div>
               <div class="mt-2 grid gap-2 text-xs sm:grid-cols-2">
                 <div class="text-themed-muted">规则：{{ localizeAuditText(finding.ruleName || finding.ruleId) }} / {{ localizeRuleSource(finding.ruleSource) }}</div>
-                <div class="text-themed-muted">分类：{{ localizeAuditCategory(finding.protocolCategory || finding.category) }} / 命中：{{ finding.matchedText || '-' }} / 置信度：{{ finding.confidence ?? '-' }}</div>
+                <div class="text-themed-muted">分类：{{ localizeAuditCategory(finding.protocolCategory || finding.category) }} / 命中：{{ finding.matchedText || '-' }} / 置信度：{{ finding.confidence ?? '-' }}<span v-if="finding.observedPorts?.length"> / 端口：{{ finding.observedPorts.join(', ') }}</span></div>
                 <div v-if="finding.recommendation" class="text-themed-muted sm:col-span-2">建议：{{ localizeAuditText(finding.recommendation) }}</div>
                 <div v-if="finding.ignored" class="text-blue-500 sm:col-span-2">已被白名单忽略：{{ finding.ignoreReason || '-' }}</div>
               </div>
@@ -1892,7 +1983,7 @@ async function runAuditKillProcess() {
           <h3 class="text-base font-semibold text-themed">网络连接</h3>
           <div class="space-y-2 max-h-96 overflow-auto">
             <div v-for="(connection, index) in auditResult.connections" :key="`${connection.raw}-${index}`" class="rounded-lg px-3 py-2 text-xs" :class="themeStore.isDark ? 'bg-gray-900' : 'bg-gray-50'">
-              <div class="font-mono text-themed">{{ connection.protocol }} {{ connection.state }} {{ connection.local }} -> {{ connection.peer }}</div>
+              <div class="font-mono text-themed">{{ connection.protocol }} {{ connection.state }} {{ connection.local }}<span v-if="connection.localPort"> (端口 {{ connection.localPort }})</span> -> {{ connection.peer }}<span v-if="connection.peerPort"> (端口 {{ connection.peerPort }})</span></div>
               <div v-if="connection.process" class="text-themed-muted mt-1">{{ connection.process }}</div>
             </div>
           </div>
