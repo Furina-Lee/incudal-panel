@@ -540,7 +540,8 @@ export interface CreateInstanceRequest {
   memory: number
   disk: number
   hostId: number
-  sshKeyId: number
+  authMethod: 'password' | 'ssh_key'
+  sshKeyId?: number
   networkMode?: 'nat' | 'nat_ipv6' | 'nat_ipv6_nat' | 'ipv6_only' | 'ipv6_nat'
   portLimit?: number
   snapshotLimit?: number

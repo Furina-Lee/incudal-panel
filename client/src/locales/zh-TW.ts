@@ -14,6 +14,7 @@ export default {
         cancel: '取消',
         save: '儲存',
         saving: '儲存中...',
+        saveSuccess: '儲存成功',
         send: '發送',
         sending: '發送中...',
         syncing: '同步中...',
@@ -251,7 +252,7 @@ export default {
     },
 
     status: {
-        title: '系統狀態', description: '查看服務運作狀態與事件更新。', adminTitle: '狀態管理', adminDescription: '管理公開元件與事件，不揭露內部基礎設施資訊。', components: '服務元件', incidents: '事件', noComponents: '尚未設定元件。', noIncidents: '目前沒有事件。', operational: '運作正常', degraded: '服務降級', markOperational: '標記為正常', markDegraded: '標記為降級', componentName: '元件名稱', componentDescription: '公開說明', incidentTitle: '事件標題', incidentBody: '公開事件更新', investigating: '調查中', identified: '已確認', monitoring: '監控中', resolved: '已解決', resolve: '解決事件', none: '無影響', minor: '輕微影響', major: '重大影響', critical: '嚴重影響', maintenance: '計劃維護', noMaintenance: '目前沒有計劃維護。', scheduled: '已排程', active: '進行中', completed: '已完成', cancelled: '已取消', maintenanceTitle: '維護標題', maintenanceBody: '公開維護說明', startsAt: '開始時間', endsAt: '結束時間', createMaintenance: '建立維護計劃', saveMaintenance: '儲存變更', cancelMaintenance: '取消維護', maintenanceUpdate: '維護進度更新', postUpdate: '發布更新'
+        title: '系統狀態', description: '查看服務運作狀態與事件更新。', adminTitle: '狀態管理', adminDescription: '管理公開元件與事件，不揭露內部基礎設施資訊。', adminEyebrow: '營運控制台', components: '服務元件', componentsHint: '維護對外展示的服務健康狀態。', incidents: '事件', incidentsHint: '記錄事件影響與處理進度。', noComponents: '尚未設定元件。', noComponentDescription: '尚未新增公開說明', noIncidents: '目前沒有事件。', operational: '運作正常', degraded: '服務降級', markOperational: '標記為正常', markDegraded: '標記為降級', componentName: '元件名稱', componentDescription: '公開說明', sortOrder: '排序', newComponent: '新增元件', editComponent: '編輯元件', incidentTitle: '事件標題', incidentBody: '公開事件更新', newIncident: '發布事件', editIncident: '編輯事件', impact: '影響程度', statusLabel: '狀態', timeline: '處理時間線', investigating: '調查中', identified: '已確認', monitoring: '監控中', resolved: '已解決', resolve: '解決事件', resolveSuccess: '事件已解決', none: '無影響', minor: '輕微影響', major: '重大影響', critical: '嚴重影響', maintenance: '計劃維護', maintenanceHint: '提前發布維護時段，持續同步進度。', noMaintenance: '目前沒有計劃維護。', scheduled: '已排程', active: '進行中', completed: '已完成', cancelled: '已取消', maintenanceTitle: '維護標題', maintenanceBody: '公開維護說明', newMaintenance: '新增維護', editMaintenance: '編輯維護', startsAt: '開始時間', endsAt: '結束時間', invalidMaintenanceRange: '結束時間必須晚於開始時間', createMaintenance: '建立維護計劃', saveMaintenance: '儲存變更', cancelMaintenance: '取消維護', cancelSuccess: '維護已取消', maintenanceUpdate: '維護進度更新', updatePosted: '進度已發布', postUpdate: '發布更新', confirmDeleteComponent: '確定刪除元件「{name}」嗎？', confirmDeleteIncident: '確定刪除事件「{title}」嗎？', confirmResolveIncident: '確定將事件「{title}」標記為已解決嗎？', confirmCancelMaintenance: '確定取消維護「{title}」嗎？', confirmDeleteMaintenance: '確定刪除維護「{title}」嗎？'
     },
 
     // 佈景主題
@@ -1075,6 +1076,12 @@ export default {
             instanceNamePlaceholder: 'my-instance',
             selectPackage: '請選擇方案',
             selectSshKey: '請選擇 SSH 金鑰',
+            authMethodTitle: '登入方式',
+            authMethodDescription: '預設使用密碼登入，建立後可在實例詳情查看 root 密碼。',
+            passwordLogin: '密碼登入',
+            passwordLoginHint: '系統會產生隨機 root 密碼。',
+            sshKeyLogin: 'SSH 金鑰登入',
+            sshKeyLoginHint: '使用個人設定中保存的 SSH 公鑰登入。',
             creating: '建立中...',
             createSuccess: '實例建立中，請稍後在實例列表中查看狀態',
             loadFailed: '載入資料失敗',

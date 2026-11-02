@@ -876,6 +876,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
       memory?: number
       disk?: number
       hostId: number
+      authMethod?: 'password' | 'ssh_key'
       sshKeyId?: number
       sshKey?: string
       password?: string
@@ -896,6 +897,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
           memory: { type: 'integer', minimum: 128, maximum: 524288 },
           disk: { type: 'integer', minimum: 512, maximum: 104857600 },
           hostId: { type: 'integer', minimum: 1 },
+          authMethod: { type: 'string', enum: ['password', 'ssh_key'] },
           sshKeyId: { type: 'integer' },
           sshKey: { type: 'string' },
           password: { type: 'string' },
@@ -914,6 +916,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
       memory?: number
       disk?: number
       hostId: number
+      authMethod?: 'password' | 'ssh_key'
       sshKeyId?: number
       sshKey?: string
       password?: string
@@ -921,9 +924,10 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
       promoCode?: string  // AFF 优惠码
     }
   }>, reply: FastifyReply) => {
-    const { name, packageId, planId, image, cpu, memory, disk, hostId, sshKeyId, customInitCommandIds, promoCode } = request.body
+    const { name, packageId, planId, image, cpu, memory, disk, hostId, sshKeyId, authMethod: requestedAuthMethod, customInitCommandIds, promoCode } = request.body
     let { sshKey } = request.body
     const { user } = request
+    const authMethod = requestedAuthMethod ?? (sshKeyId ? 'ssh_key' : 'password')
 
     // ==================== 阶段一: 验证与校验 ====================
 
@@ -933,13 +937,21 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: nameValidation.message })
     }
 
-    // 0. 处理 SSH 密钥：支持 sshKeyId 或直接传 sshKey
-    if (sshKeyId && !sshKey) {
+    // 0. 解析认证方式：密码模式由服务端生成 root 密码，密钥模式必须使用本人密钥。
+    if (authMethod !== 'password' && authMethod !== 'ssh_key') {
+      return reply.code(400).send(apiError(ErrorCode.INVALID_PARAMS, '认证方式无效'))
+    }
+    if (authMethod === 'ssh_key') {
+      if (!sshKeyId || sshKey) {
+        return reply.code(400).send(apiError(ErrorCode.INVALID_PARAMS, 'SSH 密钥登录必须选择已保存的 SSH 密钥'))
+      }
       const keyRecord = await db.getSSHKeyById(sshKeyId)
       if (!keyRecord || keyRecord.user_id !== user.id) {
         return reply.code(400).send(apiError(ErrorCode.SSH_KEY_NOT_OWNED))
       }
       sshKey = keyRecord.public_key
+    } else {
+      sshKey = undefined
     }
 
     // 1. 验证套餐是否存在且可用
@@ -1096,11 +1108,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
     // 注意：能否开通实例只跟宿主机的资源有关，不检查套餐包资源限制
     // 宿主机资源检查在 selectAvailableHost 中进行
 
-    // 3. 验证认证方式（必须提供 SSH 公钥）
-    // 注意：不再限制用户的实例配额，用户可以创建无限数量的实例
-    if (!sshKey) {
-      return reply.code(400).send(apiError(ErrorCode.SSH_KEY_REQUIRED))
-    }
+    // 3. 认证方式已经在入口完成校验；密码模式使用自动生成的 root 密码。
 
     // 5. 验证镜像是否在预设列表中
     if (!await isValidSystemImage(image)) {

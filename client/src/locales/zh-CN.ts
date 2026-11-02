@@ -5,6 +5,7 @@ export default {
         cancel: '取消',
         save: '保存',
         saving: '保存中...',
+        saveSuccess: '保存成功',
         send: '发送',
         sending: '发送中...',
         syncing: '同步中...',
@@ -243,7 +244,7 @@ export default {
     },
 
     status: {
-        title: '系统状态', description: '查看服务运行状态与故障更新。', adminTitle: '状态管理', adminDescription: '管理公开组件与故障事件，不暴露内部基础设施信息。', components: '服务组件', incidents: '故障事件', noComponents: '暂无组件。', noIncidents: '暂无故障事件。', operational: '运行正常', degraded: '服务降级', markOperational: '标记为正常', markDegraded: '标记为降级', componentName: '组件名称', componentDescription: '公开说明', incidentTitle: '事件标题', incidentBody: '公开事件更新', investigating: '调查中', identified: '已确认', monitoring: '监控中', resolved: '已解决', resolve: '解决事件', none: '无影响', minor: '轻微影响', major: '重大影响', critical: '严重影响', maintenance: '计划维护', noMaintenance: '暂无计划维护。', scheduled: '计划中', active: '进行中', completed: '已完成', cancelled: '已取消', maintenanceTitle: '维护标题', maintenanceBody: '公开维护说明', startsAt: '开始时间', endsAt: '结束时间', createMaintenance: '创建维护计划', saveMaintenance: '保存修改', cancelMaintenance: '取消维护', maintenanceUpdate: '维护进度更新', postUpdate: '发布更新'
+        title: '系统状态', description: '查看服务运行状态与故障更新。', adminTitle: '状态管理', adminDescription: '管理公开组件与故障事件，不暴露内部基础设施信息。', adminEyebrow: '运营控制台', components: '服务组件', componentsHint: '维护对外展示的服务健康状态。', incidents: '故障事件', incidentsHint: '记录故障、影响范围和处理进展。', noComponents: '暂无组件。', noComponentDescription: '尚未添加公开说明', noIncidents: '暂无故障事件。', operational: '运行正常', degraded: '服务降级', markOperational: '标记为正常', markDegraded: '标记为降级', componentName: '组件名称', componentDescription: '公开说明', sortOrder: '排序', newComponent: '新增组件', editComponent: '编辑组件', incidentTitle: '事件标题', incidentBody: '公开事件更新', newIncident: '发布故障事件', editIncident: '编辑故障事件', impact: '影响等级', statusLabel: '状态', timeline: '处理时间线', investigating: '调查中', identified: '已确认', monitoring: '监控中', resolved: '已解决', resolve: '解决事件', resolveSuccess: '事件已解决', none: '无影响', minor: '轻微影响', major: '重大影响', critical: '严重影响', maintenance: '计划维护', maintenanceHint: '提前发布维护窗口，并持续同步进展。', noMaintenance: '暂无计划维护。', scheduled: '计划中', active: '进行中', completed: '已完成', cancelled: '已取消', maintenanceTitle: '维护标题', maintenanceBody: '公开维护说明', newMaintenance: '新增维护计划', editMaintenance: '编辑维护计划', startsAt: '开始时间', endsAt: '结束时间', invalidMaintenanceRange: '结束时间必须晚于开始时间', createMaintenance: '创建维护计划', saveMaintenance: '保存修改', cancelMaintenance: '取消维护', cancelSuccess: '维护计划已取消', maintenanceUpdate: '维护进度更新', updatePosted: '进度已发布', postUpdate: '发布更新', confirmDeleteComponent: '确定删除组件“{name}”吗？', confirmDeleteIncident: '确定删除事件“{title}”吗？', confirmResolveIncident: '确定将事件“{title}”标记为已解决吗？', confirmCancelMaintenance: '确定取消维护计划“{title}”吗？', confirmDeleteMaintenance: '确定删除维护计划“{title}”吗？'
     },
 
     // 主题
@@ -932,6 +933,12 @@ export default {
             instanceNamePlaceholder: 'my-instance',
             selectPackage: '请选择套餐',
             selectSshKey: '请选择 SSH 密钥',
+            authMethodTitle: '登录方式',
+            authMethodDescription: '默认使用密码登录，创建后可在实例详情查看 root 密码。',
+            passwordLogin: '密码登录',
+            passwordLoginHint: '系统会生成随机 root 密码。',
+            sshKeyLogin: 'SSH 密钥登录',
+            sshKeyLoginHint: '使用你保存的 SSH 公钥登录。',
             creating: '创建中...',
             createSuccess: '实例创建中，请稍后在实例列表中查看状态',
             loadFailed: '加载数据失败',

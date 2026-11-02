@@ -62,7 +62,7 @@ export default async function statusRoutes(fastify: FastifyInstance) {
 
     admin.post<{ Body: { name: string; description?: string; sortOrder?: number; isOperational?: boolean } }>('/admin/status/components', async (request, reply) => {
       const { name, description, sortOrder = 0, isOperational = true } = request.body
-      if (!name?.trim() || name.length > 120 || (description?.length ?? 0) > 500 || !Number.isInteger(sortOrder)) return reply.code(400).send({ error: 'Invalid component fields' })
+      if (typeof name !== 'string' || !name.trim() || name.length > 120 || (description !== undefined && typeof description !== 'string') || (typeof description === 'string' && description.length > 500) || !Number.isInteger(sortOrder) || typeof isOperational !== 'boolean') return reply.code(400).send({ error: 'Invalid component fields' })
       try {
         return reply.code(201).send(await prisma.statusComponent.create({ data: { name: name.trim(), description: description?.trim() || null, sortOrder, isOperational } }))
       } catch (error) {
@@ -74,7 +74,7 @@ export default async function statusRoutes(fastify: FastifyInstance) {
     admin.patch<{ Params: { id: string }; Body: { name?: string; description?: string | null; sortOrder?: number; isOperational?: boolean } }>('/admin/status/components/:id', async (request, reply) => {
       const id = Number(request.params.id)
       const { name, description, sortOrder, isOperational } = request.body
-      if (!Number.isInteger(id) || (name !== undefined && (!name.trim() || name.length > 120)) || (description != null && description.length > 500) || (sortOrder !== undefined && !Number.isInteger(sortOrder))) return reply.code(400).send({ error: 'Invalid component fields' })
+      if (!Number.isInteger(id) || (name !== undefined && (typeof name !== 'string' || !name.trim() || name.length > 120)) || (description !== undefined && description !== null && (typeof description !== 'string' || description.length > 500)) || (sortOrder !== undefined && !Number.isInteger(sortOrder)) || (isOperational !== undefined && typeof isOperational !== 'boolean')) return reply.code(400).send({ error: 'Invalid component fields' })
       const result = await prisma.statusComponent.updateMany({ where: { id }, data: { ...(name === undefined ? {} : { name: name.trim() }), ...(description === undefined ? {} : { description: description?.trim() || null }), ...(sortOrder === undefined ? {} : { sortOrder }), ...(isOperational === undefined ? {} : { isOperational }) } })
       if (!result.count) return reply.code(404).send({ error: 'Component not found' })
       return prisma.statusComponent.findUnique({ where: { id } })
@@ -90,7 +90,7 @@ export default async function statusRoutes(fastify: FastifyInstance) {
 
     admin.post<{ Body: { title: string; status: string; impact: string; body: string } }>('/admin/status/incidents', async (request, reply) => {
       const { title, status, impact, body } = request.body
-      if (!title?.trim() || title.length > 200 || !allowed(status, incidentStatuses) || !allowed(impact, impacts) || !body?.trim() || body.length > 10000) return reply.code(400).send({ error: 'Invalid incident fields' })
+      if (typeof title !== 'string' || !title.trim() || title.length > 200 || !allowed(status, incidentStatuses) || !allowed(impact, impacts) || typeof body !== 'string' || !body.trim() || body.length > 10000) return reply.code(400).send({ error: 'Invalid incident fields' })
       const incident = await prisma.statusIncident.create({ data: { title: title.trim(), status: status as IncidentStatus, impact, body: body.trim(), resolvedAt: status === 'resolved' ? new Date() : null, updates: { create: { status: status as IncidentStatus, body: body.trim() } } }, include: { updates: true } })
       return reply.code(201).send(incident)
     })
@@ -98,7 +98,7 @@ export default async function statusRoutes(fastify: FastifyInstance) {
     admin.patch<{ Params: { id: string }; Body: { title?: string; status?: string; impact?: string; body?: string } }>('/admin/status/incidents/:id', async (request, reply) => {
       const id = Number(request.params.id)
       const { title, status, impact, body } = request.body
-      if (!Number.isInteger(id) || (title !== undefined && (!title.trim() || title.length > 200)) || (status !== undefined && !allowed(status, incidentStatuses)) || (impact !== undefined && !allowed(impact, impacts)) || (body !== undefined && (!body.trim() || body.length > 10000))) return reply.code(400).send({ error: 'Invalid incident fields' })
+      if (!Number.isInteger(id) || (title !== undefined && (typeof title !== 'string' || !title.trim() || title.length > 200)) || (status !== undefined && !allowed(status, incidentStatuses)) || (impact !== undefined && !allowed(impact, impacts)) || (body !== undefined && (typeof body !== 'string' || !body.trim() || body.length > 10000))) return reply.code(400).send({ error: 'Invalid incident fields' })
       const existing = await prisma.statusIncident.findUnique({ where: { id } })
       if (!existing) return reply.code(404).send({ error: 'Incident not found' })
       return prisma.$transaction(async tx => {

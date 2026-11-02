@@ -5,6 +5,7 @@ export default {
         cancel: 'Cancel',
         save: 'Save',
         saving: 'Saving...',
+        saveSuccess: 'Saved successfully',
         send: 'Send',
         sending: 'Sending...',
         syncing: 'Syncing...',
@@ -243,7 +244,7 @@ export default {
     },
 
     status: {
-        title: 'System Status', description: 'Current service health and incident updates.', adminTitle: 'Status Management', adminDescription: 'Manage public components and incidents without exposing infrastructure details.', components: 'Components', incidents: 'Incidents', noComponents: 'No components configured.', noIncidents: 'No incidents reported.', operational: 'Operational', degraded: 'Degraded', markOperational: 'Mark operational', markDegraded: 'Mark degraded', componentName: 'Component name', componentDescription: 'Public description', incidentTitle: 'Incident title', incidentBody: 'Public incident update', investigating: 'Investigating', identified: 'Identified', monitoring: 'Monitoring', resolved: 'Resolved', resolve: 'Resolve', none: 'No impact', minor: 'Minor impact', major: 'Major impact', critical: 'Critical impact', maintenance: 'Scheduled maintenance', noMaintenance: 'No scheduled maintenance.', scheduled: 'Scheduled', active: 'In progress', completed: 'Completed', cancelled: 'Cancelled', maintenanceTitle: 'Maintenance title', maintenanceBody: 'Public maintenance details', startsAt: 'Starts at', endsAt: 'Ends at', createMaintenance: 'Schedule maintenance', saveMaintenance: 'Save changes', cancelMaintenance: 'Cancel maintenance', maintenanceUpdate: 'Post a maintenance update', postUpdate: 'Post update'
+        title: 'System Status', description: 'Current service health and incident updates.', adminTitle: 'Status Management', adminDescription: 'Manage public components and incidents without exposing infrastructure details.', adminEyebrow: 'Operations console', components: 'Components', componentsHint: 'Maintain the public service health overview.', incidents: 'Incidents', incidentsHint: 'Record impact, response, and resolution progress.', noComponents: 'No components configured.', noComponentDescription: 'No public description yet', noIncidents: 'No incidents reported.', operational: 'Operational', degraded: 'Degraded', markOperational: 'Mark operational', markDegraded: 'Mark degraded', componentName: 'Component name', componentDescription: 'Public description', sortOrder: 'Sort order', newComponent: 'New component', editComponent: 'Edit component', incidentTitle: 'Incident title', incidentBody: 'Public incident update', newIncident: 'Publish incident', editIncident: 'Edit incident', impact: 'Impact', statusLabel: 'Status', timeline: 'Timeline', investigating: 'Investigating', identified: 'Identified', monitoring: 'Monitoring', resolved: 'Resolved', resolve: 'Resolve', resolveSuccess: 'Incident resolved', none: 'No impact', minor: 'Minor impact', major: 'Major impact', critical: 'Critical impact', maintenance: 'Scheduled maintenance', maintenanceHint: 'Publish maintenance windows and keep progress visible.', noMaintenance: 'No scheduled maintenance.', scheduled: 'Scheduled', active: 'In progress', completed: 'Completed', cancelled: 'Cancelled', maintenanceTitle: 'Maintenance title', maintenanceBody: 'Public maintenance details', newMaintenance: 'New maintenance', editMaintenance: 'Edit maintenance', startsAt: 'Starts at', endsAt: 'Ends at', invalidMaintenanceRange: 'End time must be after the start time', createMaintenance: 'Schedule maintenance', saveMaintenance: 'Save changes', cancelMaintenance: 'Cancel maintenance', cancelSuccess: 'Maintenance cancelled', maintenanceUpdate: 'Post a maintenance update', updatePosted: 'Update posted', postUpdate: 'Post update', confirmDeleteComponent: 'Delete component “{name}”?', confirmDeleteIncident: 'Delete incident “{title}”?', confirmResolveIncident: 'Mark incident “{title}” as resolved?', confirmCancelMaintenance: 'Cancel maintenance “{title}”?', confirmDeleteMaintenance: 'Delete maintenance “{title}”?'
     },
 
     // Theme
@@ -932,6 +933,12 @@ export default {
             instanceNamePlaceholder: 'my-instance',
             selectPackage: 'Please select a package',
             selectSshKey: 'Please select an SSH key',
+            authMethodTitle: 'Login method',
+            authMethodDescription: 'Password login is selected by default. View the generated root password in instance details.',
+            passwordLogin: 'Password login',
+            passwordLoginHint: 'A random root password will be generated.',
+            sshKeyLogin: 'SSH key login',
+            sshKeyLoginHint: 'Use an SSH public key saved in your profile.',
             creating: 'Creating...',
             createSuccess: 'Instance is being created. Please check the instance list later',
             loadFailed: 'Failed to load data',

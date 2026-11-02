@@ -124,6 +124,7 @@ interface InstanceForm {
   cpu: number
   memory: number
   disk: number
+  authMethod: 'password' | 'ssh_key'
   sshKeyId: number | null
   customInitCommandIds: number[]  // 用户自定义初始化命令
   promoCode: string  // 优惠码
@@ -138,6 +139,7 @@ const form = ref<InstanceForm>({
   cpu: 15,
   memory: 128,
   disk: 512,
+  authMethod: 'password',
   sshKeyId: null,
   customInitCommandIds: [],
   promoCode: ''
@@ -364,8 +366,7 @@ const canSubmit = computed<boolean>(() => {
          form.value.hostId !== null &&
          !!form.value.image &&
          availableImages.value.length > 0 &&
-         sshKeys.value.length > 0 &&
-         form.value.sshKeyId !== null &&
+         (form.value.authMethod === 'password' || (sshKeys.value.length > 0 && form.value.sshKeyId !== null)) &&
          quotaCheck.value.valid &&
          resourceLimitCheck.value.valid &&
          !submitting.value &&
@@ -936,8 +937,10 @@ async function handleSubmit(): Promise<void> {
   try {
     if (form.value.packageId === null) throw new Error(t('instance.createPage.selectPackage'))
     if (form.value.hostId === null) throw new Error(getCreatePageText('selectHost'))
-    if (form.value.sshKeyId === null) throw new Error(getCreatePageText('selectSshKey'))
-    
+    if (form.value.authMethod === 'ssh_key' && form.value.sshKeyId === null) {
+      throw new Error(getCreatePageText('selectSshKey'))
+    }
+
     // 验证实例名称
     const nameValidation = validateInstanceName(form.value.name)
     if (!nameValidation.valid) {
@@ -953,7 +956,8 @@ async function handleSubmit(): Promise<void> {
       cpu: form.value.cpu,
       memory: form.value.memory,
       disk: form.value.disk,
-      sshKeyId: form.value.sshKeyId,
+      authMethod: form.value.authMethod,
+      ...(form.value.authMethod === 'ssh_key' && form.value.sshKeyId !== null ? { sshKeyId: form.value.sshKeyId } : {}),
       customInitCommandIds: form.value.customInitCommandIds.length > 0 ? form.value.customInitCommandIds : undefined,
       promoCode: (isPaidPackage.value && promoCodeValid.value && form.value.promoCode.trim()) ? form.value.promoCode.trim() : undefined
     } as CreateInstanceRequest & { promoCode?: string })
@@ -1128,13 +1132,59 @@ async function handleSubmit(): Promise<void> {
             <div v-if="form.image" class="card p-5">
               <InitCommandSelector v-model="form.customInitCommandIds" :distro="selectedImageDistro" />
             </div>
-            <SSHKeySelector
-              :ssh-keys="sshKeys"
-              :selected-key-id="form.sshKeyId"
-              :step-number="regions.length > 0 ? 5 : 4"
-              :title="getCreatePageText('selectSshKey')"
-              @update:selected-key-id="form.sshKeyId = $event"
-            />
+            <section class="card p-5 space-y-4">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <h3 class="font-semibold text-themed">{{ $t('instance.createPage.authMethodTitle') }}</h3>
+                  <p class="mt-1 text-sm text-themed-muted">{{ $t('instance.createPage.authMethodDescription') }}</p>
+                </div>
+                <span class="rounded-full bg-themed-tertiary px-2.5 py-1 text-xs font-medium text-themed-muted">
+                  {{ regions.length > 0 ? 5 : 4 }}
+                </span>
+              </div>
+              <div class="grid gap-3 sm:grid-cols-2" role="radiogroup" :aria-label="$t('instance.createPage.authMethodTitle')">
+                <button
+                  type="button"
+                  class="rounded-xl border p-4 text-left transition-colors"
+                  :class="form.authMethod === 'password' ? 'border-blue-500 bg-blue-500/10 ring-2 ring-blue-500/20' : 'border-themed hover:border-blue-400'"
+                  role="radio"
+                  :aria-checked="form.authMethod === 'password'"
+                  @click="form.authMethod = 'password'; form.sshKeyId = null"
+                >
+                  <span class="flex items-center gap-2 font-medium text-themed">
+                    <svg class="h-5 w-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a3 3 0 11-6 0 3 3 0 016 0zm-9 14a9 9 0 1118 0H6z" /></svg>
+                    {{ $t('instance.createPage.passwordLogin') }}
+                  </span>
+                  <span class="mt-2 block text-xs text-themed-muted">{{ $t('instance.createPage.passwordLoginHint') }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="rounded-xl border p-4 text-left transition-colors"
+                  :class="form.authMethod === 'ssh_key' ? 'border-blue-500 bg-blue-500/10 ring-2 ring-blue-500/20' : 'border-themed hover:border-blue-400'"
+                  role="radio"
+                  :aria-checked="form.authMethod === 'ssh_key'"
+                  @click="form.authMethod = 'ssh_key'"
+                >
+                  <span class="flex items-center gap-2 font-medium text-themed">
+                    <svg class="h-5 w-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.59 14.37a6 6 0 01-5.84 7.63 6 6 0 01-5.84-7.63A6 6 0 0110 9.1V6a2 2 0 114 0v3.1a6 6 0 011.59 5.27zM12 6v1" /></svg>
+                    {{ $t('instance.createPage.sshKeyLogin') }}
+                  </span>
+                  <span class="mt-2 block text-xs text-themed-muted">{{ $t('instance.createPage.sshKeyLoginHint') }}</span>
+                </button>
+              </div>
+              <SSHKeySelector
+                v-if="form.authMethod === 'ssh_key'"
+                :ssh-keys="sshKeys"
+                :selected-key-id="form.sshKeyId"
+                :step-number="regions.length > 0 ? 5 : 4"
+                :title="getCreatePageText('selectSshKey')"
+                @update:selected-key-id="form.sshKeyId = $event"
+              />
+              <p v-if="form.authMethod === 'ssh_key' && sshKeys.length === 0" class="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-700 dark:border-amber-500/30 dark:bg-amber-900/20 dark:text-amber-300">
+                {{ $t('instance.createPage.missingSshKey') }}
+                <router-link to="/profile" class="font-medium underline">{{ $t('instance.createPage.profileSettings') }}</router-link>
+              </p>
+            </section>
             <!-- 订单概览 -->
             <div v-if="isPaidPackage && form.planId && selectedPlan" class="card p-5">
               <div class="flex items-center gap-3 mb-5">
@@ -1239,7 +1289,7 @@ async function handleSubmit(): Promise<void> {
               </p>
               <input v-model="form.name" type="text" class="input w-full" :placeholder="$t('instance.createPage.instanceNamePlaceholder')" required />
             </div>
-            <div v-if="sshKeys.length === 0" class="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-400 dark:border-yellow-500/30 rounded-lg">
+            <div v-if="form.authMethod === 'ssh_key' && sshKeys.length === 0" class="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-400 dark:border-yellow-500/30 rounded-lg">
               <p class="text-sm text-yellow-800 dark:text-yellow-300 font-medium mb-1">⚠️ {{ $t('instance.createPage.missingSshKey') }}</p>
               <p class="text-xs text-yellow-700 dark:text-yellow-400">{{ $t('instance.createPage.missingSshKeyDesc') }} <router-link to="/profile" class="underline hover:text-yellow-900 dark:hover:text-yellow-200 font-medium">{{ $t('instance.createPage.profileSettings') }}</router-link> {{ $t('instance.createPage.addSshKey') }}</p>
             </div>

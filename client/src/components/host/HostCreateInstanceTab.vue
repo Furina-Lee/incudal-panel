@@ -416,6 +416,7 @@ async function handleSelfSubmit(): Promise<void> {
     cpu: form.value.cpu,
     memory: form.value.memory,
     disk: form.value.disk,
+    authMethod: 'ssh_key',
     sshKeyId: form.value.sshKeyId,
     customInitCommandIds: form.value.customInitCommandIds
   })
