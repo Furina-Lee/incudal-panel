@@ -376,6 +376,20 @@ enum RechargeStatus {
   refunded      // 已退款
 }
 
+enum InstancePlanUpgradeOrderStatus {
+  pending
+  fulfilled
+  failed
+  cancelled
+  expired
+}
+
+enum PlanInventoryReservationStatus {
+  reserved
+  released
+  consumed
+}
+
 enum VipLevelRuleType {
   user
   hosting
@@ -514,6 +528,7 @@ model User {
   // 计费相关
   balanceLogs     BalanceLog[]
   rechargeRecords RechargeRecord[]
+  instancePlanUpgradeOrders InstancePlanUpgradeOrder[]
   badgeOwnerships UserBadgeOwnership[]
   vipBenefitClaims VipBenefitClaim[]
 
@@ -1112,6 +1127,7 @@ model Instance {
   checkinRecords   CheckinRecord[]
   redeemCodeUsages RedeemCodeUsage[]
   billingRecords   InstanceBillingRecord[]  // 计费记录
+  planUpgradeOrders InstancePlanUpgradeOrder[]
   affBinding       AffBinding?              // AFF优惠码绑定
   resourcePoolLogs ResourcePoolLog[]        // 资源池应用记录
   destroyRecords   UserDestroyRecord[]      // 销毁记录
@@ -2252,6 +2268,7 @@ model RechargeRecord {
 
   user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   provider PaymentProvider @relation(fields: [providerId], references: [id])
+  instancePlanUpgradeOrder InstancePlanUpgradeOrder?
 
   @@index([userId, status])
   @@index([status, createdAt])
@@ -2351,6 +2368,8 @@ model PackagePlan {
   disk   Int // 磁盘 (MB)，如 10240, 20480, 51200
 
   // ========== 配额限制（方案级别独立配置） ==========
+  maxInstances      Int?   @map("max_instances")       // 最多可开实例数，null 表示无限制
+  reservedInstances Int    @default(0) @map("reserved_instances") // 已预留实例数
   portLimit         Int    @map("port_limit")          // 端口映射数上限
   snapshotLimit     Int    @map("snapshot_limit")      // 快照数上限
   backupLimit       Int    @map("backup_limit")        // 备份数上限
@@ -2379,10 +2398,48 @@ model PackagePlan {
   package   Package    @relation(fields: [packageId], references: [id], onDelete: Cascade)
   instances Instance[]
   affCodes  AffCode[]  // AFF优惠码
+  sourceUpgradeOrders InstancePlanUpgradeOrder[] @relation("UpgradeOrderSourcePlan")
+  targetUpgradeOrders InstancePlanUpgradeOrder[] @relation("UpgradeOrderTargetPlan")
 
   @@unique([packageId, name]) // 同一套餐下方案名称唯一
   @@index([packageId, isActive])
   @@map("package_plans")
+}
+
+model InstancePlanUpgradeOrder {
+  id                    Int                           @id @default(autoincrement())
+  orderNo               String                        @unique @map("order_no")
+  userId                Int                           @map("user_id")
+  instanceId            Int                           @map("instance_id")
+  sourcePlanId          Int                           @map("source_plan_id")
+  targetPlanId          Int                           @map("target_plan_id")
+  sourceInstanceVersion Int                           @map("source_instance_version")
+  amount                Decimal                       @db.Decimal(10, 2)
+  cpuDelta              Int                           @map("cpu_delta")
+  memoryDelta           Int                           @map("memory_delta")
+  diskDelta             Int                           @map("disk_delta")
+  status                InstancePlanUpgradeOrderStatus @default(pending)
+  reservationStatus      PlanInventoryReservationStatus @default(reserved) @map("reservation_status")
+  reservationReleasedAt DateTime?                     @map("reservation_released_at")
+  rechargeRecordId      Int?                          @unique @map("recharge_record_id")
+  expiresAt             DateTime                      @map("expires_at")
+  fulfilledAt           DateTime?                     @map("fulfilled_at")
+  failureReason         String?                       @map("failure_reason")
+  createdAt             DateTime                      @default(now()) @map("created_at")
+  updatedAt             DateTime                      @updatedAt @map("updated_at")
+
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  instance       Instance         @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  sourcePlan     PackagePlan      @relation("UpgradeOrderSourcePlan", fields: [sourcePlanId], references: [id], onDelete: Restrict)
+  targetPlan     PackagePlan      @relation("UpgradeOrderTargetPlan", fields: [targetPlanId], references: [id], onDelete: Restrict)
+  rechargeRecord RechargeRecord?  @relation(fields: [rechargeRecordId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status, createdAt])
+  @@index([instanceId, status])
+  @@index([status, expiresAt])
+  @@index([sourcePlanId, status])
+  @@index([targetPlanId, status])
+  @@map("instance_plan_upgrade_orders")
 }
 
 // 实例计费记录
