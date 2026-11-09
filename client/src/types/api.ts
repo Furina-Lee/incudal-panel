@@ -1654,6 +1654,7 @@ export interface PackagePlan {
   snapshotLimit: number
   backupLimit: number
   siteLimit: number
+  maxInstances?: number | null
   monthlyTrafficLimit: string | null
   isActive: boolean
   isSoldOut: boolean
@@ -1730,6 +1731,18 @@ export interface ChangePlanPreview {
     memory: number
     disk: number
   }
+  credit?: number
+  payable?: number
+  capacity?: {
+    available: boolean
+    remaining: number | null
+    cpuAvailable: number
+    memoryAvailable: number
+    diskAvailable?: number
+  }
+  maxInstances?: number | null
+  usedInstances?: number
+  reservedInstances?: number
   resourceWarnings: string[] | null
   // 可变更状态
   canChange: boolean
