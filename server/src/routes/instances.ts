@@ -1261,7 +1261,8 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
       rootPassword: autoPassword,
       sshKey: sshKey,
       networkMode,
-      type: effectiveInstanceType === 'vm' ? 'virtual-machine' : 'container'
+      type: effectiveInstanceType === 'vm' ? 'virtual-machine' : 'container',
+      extraShellCommands
     })
 
     // ==================== 阶段四: 标识符生成 ====================
@@ -1729,7 +1730,8 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
           dns: ['10.10.0.1'],
           ipv6Address: staticIPv6 ? `${staticIPv6}` : undefined,
           ipv6Gateway: staticIPv6 ? (hostWithIpv6.ipv6_gateway || undefined) : undefined
-        } : undefined
+        } : undefined,
+        extraShellCommands
       })
       finalConfigPayload = vmResult.configPayload
       console.log(`[Provisioning] VM network-config 已更新: IPv4=${staticIPv4 || 'dhcp'}, IPv6=${staticIPv6 || 'none'}`)
@@ -1748,7 +1750,8 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
           dns: ['10.10.0.1'],
           ipv6Address: staticIPv6 ? `${staticIPv6}/128` : undefined,
           ipv6Gateway: staticIPv6 ? 'fe80::1' : undefined
-        }
+        },
+        extraShellCommands
       })
       finalConfigPayload = containerResult.configPayload
       console.log(`[Provisioning] Container network-config 已更新: IPv4=${staticIPv4}, IPv6=${staticIPv6 || 'none'}`)
