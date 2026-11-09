@@ -9,9 +9,11 @@ import { prisma } from '../db/prisma.js'
 import { createLog } from '../db/logs.js'
 import { apiError, ErrorCode } from '../lib/errors.js'
 import { sendHostManagedInstanceNotification, sendNotification } from '../lib/notifier.js'
-import { getIncusClient, patchInstanceResources } from '../lib/incus/index.js'
 import { sendRenewSuccessEmail } from '../lib/mailer.js'
-import { calculateDailyPrice } from '../lib/billing-calc.js'
+import { createPlanUpgradeOrder, getPlanUpgradePreview, releasePlanUpgradeReservation } from '../db/plan-upgrades.js'
+import { createRechargePayUrl, buildRechargeUrls, getProviderMethods, resolveRechargePaymentMethod, validateActiveRechargeProvider } from './recharge.js'
+import { buildRechargeProviderConfigSnapshot } from '../lib/recharge-provider-snapshot.js'
+import { reconcileRechargeRecord } from '../services/payment-reconciliation.js'
 
 interface BatchRenewPreviewItem {
   id: number
@@ -713,6 +715,7 @@ export default async function instanceBillingRoutes(fastify: FastifyInstance) {
     const statusCanChange = ['running', 'stopped'].includes(instance.status)
 
     try {
+      const upgradePreview = await getPlanUpgradePreview(user.id, instanceId, newPlanId)
       const preview = await db.calculatePlanChange(instance, newPlan)
 
       // 只允许升级，不允许降级
@@ -747,6 +750,12 @@ export default async function instanceBillingRoutes(fastify: FastifyInstance) {
           discountAmount: preview.discountAmount,
           // 最终结果
           priceDiff: preview.priceDiff,
+          credit: upgradePreview.credit,
+          payable: upgradePreview.payable,
+          capacity: upgradePreview.capacity,
+          maxInstances: upgradePreview.maxInstances,
+          usedInstances: upgradePreview.usedInstances,
+          reservedInstances: upgradePreview.reservedInstances,
           isUpgrade: preview.isUpgrade,
           newExpiresAt: preview.newExpiresAt.toISOString(),
           newConfig: preview.newConfig,
@@ -765,8 +774,107 @@ export default async function instanceBillingRoutes(fastify: FastifyInstance) {
     }
   })
 
+  // ==================== 创建升级支付订单 ====================
+  fastify.post<{
+    Params: { id: string }
+    Body: { newPlanId: number; providerId: number; paymentMethod?: string }
+  }>('/:id/change-plan/order', {
+    onRequest: [fastify.authenticateUser],
+    config: { rateLimit: { max: 5, timeWindow: '1 minute' } }
+  }, async (request, reply) => {
+    const instanceId = Number(request.params.id)
+    const { newPlanId, providerId, paymentMethod } = request.body
+    if (!Number.isInteger(instanceId) || !Number.isInteger(newPlanId) || !Number.isInteger(providerId)) {
+      return reply.code(400).send({ error: '参数无效', code: 'INVALID_ARGUMENT' })
+    }
+    try {
+      const preview = await getPlanUpgradePreview(request.user.id, instanceId, newPlanId)
+      if (!preview.capacity.available) return reply.code(400).send({ error: '宿主机配额不足', code: 'HOST_QUOTA_INSUFFICIENT', capacity: preview.capacity })
+      const provider = await db.getPaymentProviderById(providerId)
+      if (!provider || provider.status !== 'active') return reply.code(400).send({ error: '支付渠道不可用', code: 'PAYMENT_PROVIDER_UNAVAILABLE' })
+      const providerConfig = typeof provider.config === 'string' ? JSON.parse(provider.config) : (provider.config || {}) as Record<string, unknown>
+      const validation = validateActiveRechargeProvider({ type: provider.type, config: providerConfig })
+      if (!validation.valid) return reply.code(400).send({ error: validation.error || '支付渠道不可用' })
+      const methods = getProviderMethods(provider.methods)
+      const selectedMethod = resolveRechargePaymentMethod(provider.type, methods, paymentMethod)
+      const amount = Number(preview.payable)
+      const amountValidation = db.validateRechargeAmount(provider, amount)
+      if (!amountValidation.valid) return reply.code(400).send({ error: amountValidation.error || '支付金额不符合渠道限制' })
+      const fee = db.calculatePaymentFee(provider, amount, selectedMethod)
+      const payableAmount = db.calculatePayableAmount(provider, amount, selectedMethod)
+      const expiredAt = new Date(Date.now() + 30 * 60 * 1000)
+      const orderNo = db.generateOrderNo()
+      const details = {
+        kind: 'plan_upgrade',
+        upgradeOrderNo: orderNo,
+        recharge: { amount, payableAmount, fee, feeRate: db.getPaymentFeeConfig(provider, selectedMethod).feeRate, feeFixed: db.getPaymentFeeConfig(provider, selectedMethod).feeFixed, feeMode: provider.type === 'yipay' ? 'surcharge' : 'deduct', paymentMethod: selectedMethod || null }
+      }
+      const order = await createPlanUpgradeOrder({
+        userId: request.user.id, instanceId, targetPlanId: newPlanId, providerId, orderNo,
+        paymentMethod: selectedMethod, amount, actualAmount: payableAmount, fee,
+        expiredAt, providerConfigSnapshot: buildRechargeProviderConfigSnapshot(provider.type, providerConfig), paymentDetails: details,
+        ip: request.ip, userAgent: request.headers['user-agent']
+      })
+      const urls = buildRechargeUrls(provider.id, order.orderNo)
+      let payUrl: string | null
+      try {
+        payUrl = await createRechargePayUrl(provider, providerConfig, order.orderNo, payableAmount, selectedMethod, {
+          ...urls,
+          returnUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/instances/${instanceId}`,
+          successUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/instances/${instanceId}?change_plan_order=${encodeURIComponent(order.orderNo)}`
+        })
+        if (!payUrl) throw new Error('支付渠道未返回支付链接')
+      } catch (paymentError) {
+        await prisma.$transaction(async tx => {
+          await releasePlanUpgradeReservation(order.orderNo, '生成支付链接失败', tx)
+          await tx.rechargeRecord.updateMany({ where: { orderNo: order.orderNo, status: 'pending' }, data: { status: 'failed', failReason: '生成支付链接失败' } })
+        })
+        throw paymentError
+      }
+      return { orderNo: order.orderNo, payUrl, amount, payableAmount, expiredAt: order.expiredAt.toISOString() }
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : '创建升级订单失败' })
+    }
+  })
+
+  fastify.get<{ Params: { id: string; orderNo: string } }>('/:id/change-plan/order/:orderNo', { onRequest: [fastify.authenticateUser] }, async (request, reply) => {
+    const order = await prisma.instancePlanUpgradeOrder.findFirst({ where: { orderNo: request.params.orderNo, instanceId: Number(request.params.id), userId: request.user.id }, include: { rechargeRecord: true } })
+    if (!order) return reply.code(404).send({ error: '升级订单不存在' })
+    return { status: order.status === 'pending' && order.expiresAt <= new Date() ? 'expired' : order.status }
+  })
+
+  fastify.post<{ Params: { id: string; orderNo: string } }>('/:id/change-plan/order/:orderNo/verify', { onRequest: [fastify.authenticateUser] }, async (request, reply) => {
+    const order = await prisma.instancePlanUpgradeOrder.findFirst({ where: { orderNo: request.params.orderNo, instanceId: Number(request.params.id), userId: request.user.id }, include: { rechargeRecord: { include: { provider: true } } } })
+    if (!order || !order.rechargeRecord) return reply.code(404).send({ error: '升级订单不存在' })
+    if (order.rechargeRecord.status === 'completed') return { status: order.status }
+    if (order.expiresAt <= new Date()) {
+      await prisma.$transaction(async tx => {
+        await releasePlanUpgradeReservation(order.orderNo, '升级订单已过期', tx)
+        await tx.rechargeRecord.updateMany({ where: { orderNo: order.orderNo, status: 'pending' }, data: { status: 'cancelled', failReason: '升级订单已过期' } })
+      })
+      return { status: 'expired' }
+    }
+    try {
+      await reconcileRechargeRecord(order.rechargeRecord, 'admin_reconcile', request.user.id)
+    } catch (error) {
+      request.log.warn(error, '升级支付状态查询失败')
+    }
+    const refreshed = await prisma.instancePlanUpgradeOrder.findUnique({ where: { orderNo: order.orderNo } })
+    return { status: refreshed?.status || order.status }
+  })
+
+  fastify.post<{ Params: { id: string; orderNo: string } }>('/:id/change-plan/order/:orderNo/cancel', { onRequest: [fastify.authenticateUser] }, async (request, reply) => {
+    const order = await prisma.instancePlanUpgradeOrder.findFirst({ where: { orderNo: request.params.orderNo, instanceId: Number(request.params.id), userId: request.user.id } })
+    if (!order) return reply.code(404).send({ error: '升级订单不存在' })
+    await prisma.$transaction(async tx => {
+      await releasePlanUpgradeReservation(order.orderNo, '用户取消升级订单', tx)
+      await tx.rechargeRecord.updateMany({ where: { orderNo: order.orderNo, status: 'pending' }, data: { status: 'cancelled', failReason: '用户取消升级订单' } })
+    })
+    return { status: 'cancelled', message: '升级订单已取消' }
+  })
+
   // ==================== 执行升降级 ====================
-  // POST /api/instances/:id/change-plan
+  // POST /api/instances/:id/change-plan/
   fastify.post<{
     Params: { id: string }
     Body: { newPlanId: number }
@@ -782,7 +890,10 @@ export default async function instanceBillingRoutes(fastify: FastifyInstance) {
         }
       }
     }
-  }, async (request, reply) => {
+  }, async (_request, reply) => {
+    return reply.code(410).send({ error: '请通过支付订单完成升级', code: 'UPGRADE_PAYMENT_REQUIRED' })
+
+    /* Legacy direct-balance upgrade handler disabled; upgrades must use a payment order.
     const { user } = request
     const instanceId = Number(request.params.id)
     const { newPlanId } = request.body
@@ -937,6 +1048,8 @@ export default async function instanceBillingRoutes(fastify: FastifyInstance) {
       const errorMessage = error instanceof Error ? error.message : '升降级失败'
       return reply.code(400).send({ error: errorMessage })
     }
+    */
+    return reply.code(410).send({ error: '请通过支付订单完成升级', code: 'UPGRADE_PAYMENT_REQUIRED' })
   })
 
   // ==================== 自动续费开关 ====================

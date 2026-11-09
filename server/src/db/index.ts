@@ -167,6 +167,9 @@ export * from './payment-providers.js'
 // 导出充值记录相关操作
 export * from './recharge-records.js'
 
+// 导出套餐升级订单相关操作
+export * from './plan-upgrades.js'
+
 // 导出 AFF 推荐计划相关操作
 export * from './aff.js'
 

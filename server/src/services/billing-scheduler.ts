@@ -571,19 +571,32 @@ async function cleanExpiredRechargeOrders(): Promise<void> {
   const startTime = Date.now()
 
   try {
-    const result = await prisma.rechargeRecord.updateMany({
-      where: {
-        status: 'pending',
-        expiredAt: { lt: new Date() }
-      },
-      data: {
-        status: 'cancelled'
-      }
+    const expiredOrders = await prisma.rechargeRecord.findMany({
+      where: { status: 'pending', expiredAt: { lt: new Date() } },
+      select: { orderNo: true, paymentDetails: true }
     })
+    let cancelledCount = 0
+    for (const order of expiredOrders) {
+      await prisma.$transaction(async tx => {
+        const current = await tx.rechargeRecord.updateMany({ where: { orderNo: order.orderNo, status: 'pending' }, data: { status: 'cancelled' } })
+        if (!current.count) return
+        const details = order.paymentDetails as Record<string, unknown> | null
+        if (details?.kind === 'plan_upgrade') {
+          const upgrade = await tx.instancePlanUpgradeOrder.findUnique({ where: { orderNo: order.orderNo } })
+          if (upgrade?.reservationStatus === 'reserved') {
+            await tx.instancePlanUpgradeOrder.update({ where: { orderNo: order.orderNo }, data: { status: 'expired', reservationStatus: 'released', reservationReleasedAt: new Date(), failureReason: '支付订单已过期' } })
+            await tx.packagePlan.update({ where: { id: upgrade.targetPlanId }, data: { reservedInstances: { decrement: 1 } } })
+            const instance = await tx.instance.findUnique({ where: { id: upgrade.instanceId }, select: { hostId: true } })
+            if (instance) await tx.host.update({ where: { id: instance.hostId }, data: { cpuUsed: { decrement: upgrade.cpuDelta }, memoryUsed: { decrement: upgrade.memoryDelta }, diskUsed: { decrement: upgrade.diskDelta } } })
+          }
+        }
+        cancelledCount++
+      })
+    }
 
     const duration = Date.now() - startTime
-    if (result.count > 0) {
-      console.log(`[Billing] Cancelled ${result.count} expired recharge orders in ${duration}ms`)
+    if (cancelledCount > 0) {
+      console.log(`[Billing] Cancelled ${cancelledCount} expired recharge orders in ${duration}ms`)
     }
   } catch (error) {
     console.error('[Billing] Expired recharge orders cleanup failed:', error)

@@ -137,7 +137,7 @@ function buildEpayConfig(config: Record<string, unknown>): { epayConfig: EpayCon
   }
 }
 
-function getProviderMethods(methods: unknown): string[] {
+export function getProviderMethods(methods: unknown): string[] {
   if (!Array.isArray(methods)) {
     return []
   }
@@ -145,7 +145,7 @@ function getProviderMethods(methods: unknown): string[] {
   return methods.filter((method): method is string => typeof method === 'string' && method.trim().length > 0)
 }
 
-function resolveRechargePaymentMethod(
+export function resolveRechargePaymentMethod(
   providerType: string,
   methods: string[],
   requestedMethod?: string | null
@@ -286,7 +286,7 @@ function extractRechargeOrderNoFromCallback(
   }
 }
 
-function buildRechargeUrls(providerId: number, orderNo: string): {
+export function buildRechargeUrls(providerId: number, orderNo: string): {
   notifyUrl: string
   returnUrl: string
   successUrl: string
@@ -301,7 +301,7 @@ function buildRechargeUrls(providerId: number, orderNo: string): {
   }
 }
 
-async function createRechargePayUrl(
+export async function createRechargePayUrl(
   provider: { id: number; type: string; methods: unknown },
   config: Record<string, unknown>,
   orderNo: string,
@@ -349,7 +349,7 @@ async function createRechargePayUrl(
   return null
 }
 
-function validateActiveRechargeProvider(
+export function validateActiveRechargeProvider(
   provider: { type: string; config: Record<string, unknown> }
 ): { valid: boolean; error?: string } {
   if (!isRechargeProviderTypeSupported(provider.type)) {

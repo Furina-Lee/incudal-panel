@@ -257,6 +257,8 @@ export default async function packageRoutes(fastify: FastifyInstance) {
           setupFee: true,
           isSoldOut: true,
           slaGuarantee: true,
+          maxInstances: true,
+          reservedInstances: true,
           sortOrder: true
         },
         orderBy: { sortOrder: 'asc' }
@@ -337,6 +339,8 @@ export default async function packageRoutes(fastify: FastifyInstance) {
           setupFee: p.setupFee,
           isSoldOut: p.isSoldOut,
           slaGuarantee: p.slaGuarantee,
+          maxInstances: p.maxInstances,
+          reservedInstances: p.reservedInstances,
           monthlyPrice: Number(p.price) / (p.billingCycle || 1)
         }))
       }
@@ -1968,7 +1972,9 @@ export default async function packageRoutes(fastify: FastifyInstance) {
         isActive: plan.isActive,
         isSoldOut: plan.isSoldOut,
         sortOrder: plan.sortOrder,
-        slaGuarantee: plan.slaGuarantee ? Number(plan.slaGuarantee) : null
+        slaGuarantee: plan.slaGuarantee ? Number(plan.slaGuarantee) : null,
+        maxInstances: plan.maxInstances,
+        reservedInstances: plan.reservedInstances
       }))
     }
   })
@@ -1996,6 +2002,7 @@ export default async function packageRoutes(fastify: FastifyInstance) {
       isSoldOut?: boolean
       sortOrder?: number
       slaGuarantee?: number | null
+      maxInstances?: number | null
     }
   }>('/:id/plans', {
     onRequest: [fastify.authenticate],
@@ -2018,7 +2025,10 @@ export default async function packageRoutes(fastify: FastifyInstance) {
       return reply.code(403).send(apiError(ErrorCode.FORBIDDEN))
     }
 
-    const { name, description, cpu, memory, disk, portLimit, snapshotLimit, backupLimit, siteLimit, swapSize, trafficLimit, trafficLimitSpeed, price, billingCycle, isActive, isSoldOut, sortOrder, slaGuarantee } = request.body
+    const { name, description, cpu, memory, disk, portLimit, snapshotLimit, backupLimit, siteLimit, swapSize, trafficLimit, trafficLimitSpeed, price, billingCycle, isActive, isSoldOut, sortOrder, slaGuarantee, maxInstances } = request.body
+    if (maxInstances !== undefined && maxInstances !== null && (!Number.isInteger(maxInstances) || maxInstances < 1)) {
+      return reply.code(400).send({ error: '最大实例数必须为正整数或为空' })
+    }
     const normalizedSwapSize = pkg.instance_type === 'vm' ? 0 : swapSize
 
     if (isActive !== undefined && typeof isActive !== 'boolean') {
@@ -2098,7 +2108,8 @@ export default async function packageRoutes(fastify: FastifyInstance) {
         isActive,
         isSoldOut,
         sortOrder,
-        slaGuarantee
+        slaGuarantee,
+        maxInstances
       })
 
       await createLog(
@@ -2142,6 +2153,7 @@ export default async function packageRoutes(fastify: FastifyInstance) {
       isSoldOut?: boolean
       sortOrder?: number
       slaGuarantee?: number | null
+      maxInstances?: number | null
     }
   }>('/:id/plans/:planId', {
     onRequest: [fastify.authenticate],
@@ -2171,7 +2183,10 @@ export default async function packageRoutes(fastify: FastifyInstance) {
       return reply.code(404).send({ error: '方案不存在' })
     }
 
-    const { name, description, cpu, memory, disk, portLimit, snapshotLimit, backupLimit, siteLimit, swapSize, trafficLimit, trafficLimitSpeed, price, billingCycle, isActive, isSoldOut, sortOrder, slaGuarantee } = request.body
+    const { name, description, cpu, memory, disk, portLimit, snapshotLimit, backupLimit, siteLimit, swapSize, trafficLimit, trafficLimitSpeed, price, billingCycle, isActive, isSoldOut, sortOrder, slaGuarantee, maxInstances } = request.body
+    if (maxInstances !== undefined && maxInstances !== null && (!Number.isInteger(maxInstances) || maxInstances < 1)) {
+      return reply.code(400).send({ error: '最大实例数必须为正整数或为空' })
+    }
     const normalizedSwapSize = pkg.instance_type === 'vm' ? 0 : swapSize
 
     if (isActive !== undefined && typeof isActive !== 'boolean') {
@@ -2258,6 +2273,7 @@ export default async function packageRoutes(fastify: FastifyInstance) {
       if (isSoldOut !== undefined) updateData.isSoldOut = isSoldOut
       if (sortOrder !== undefined) updateData.sortOrder = sortOrder
       if (slaGuarantee !== undefined) updateData.slaGuarantee = slaGuarantee
+      if (maxInstances !== undefined) updateData.maxInstances = maxInstances
 
       const updatedPlan = await db.updatePlan(planIdNum, updateData)
 

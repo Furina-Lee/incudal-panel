@@ -7,6 +7,8 @@ import type { RechargeRecord, RechargeStatus } from '@prisma/client'
 import { nanoid } from 'nanoid'
 import { getTradeNoForIndex } from '../lib/recharge-reliability.js'
 import { getTodayRange } from '../lib/timezone.js'
+import { getRechargePayableAmount } from '../lib/recharge-payment-details.js'
+import { fulfillPlanUpgrade, isPlanUpgradePaymentDetails } from './plan-upgrades.js'
 
 export { getTradeNoForIndex } from '../lib/recharge-reliability.js'
 
@@ -319,6 +321,7 @@ export async function completeRecharge(
   }
 
   // 使用事务确保原子性
+  let upgradeSync: any = null
   const result = await prisma.$transaction(async (tx) => {
     // 1. 使用条件更新确保并发安全（只有 pending 或 paid 状态可以变为 completed）
     const updateResult = await tx.rechargeRecord.updateMany({
@@ -357,6 +360,15 @@ export async function completeRecharge(
 
     if (!updatedRecord) {
       throw new Error('订单更新异常')
+    }
+
+    const paymentDetails = (updatedRecord.paymentDetails ?? record.paymentDetails) as unknown
+    if (isPlanUpgradePaymentDetails(paymentDetails)) {
+      if (Number(data.actualAmount ?? record.actualAmount ?? record.amount) + 0.01 < getRechargePayableAmount({ amount: record.amount, fee: record.fee, paymentDetails })) {
+        throw new Error('升级订单支付金额不足')
+      }
+      upgradeSync = await fulfillPlanUpgrade(paymentDetails.upgradeOrderNo, tx)
+      return updatedRecord
     }
 
     // 2. 增加用户余额（使用 ?? 避免 0 值被误判为 falsy）
@@ -402,6 +414,26 @@ export async function completeRecharge(
     return updatedRecord
   })
 
+  const completedUpgrade = upgradeSync as { instanceId: number; hostId: number; incusId: string; cpu: number; memory: number; disk: number } | null
+  if (completedUpgrade && completedUpgrade.incusId) {
+    try {
+      const { getHostById } = await import('./hosts.js')
+      const { getIncusClient, patchInstanceResources } = await import('../lib/incus/index.js')
+      const host = await getHostById(completedUpgrade.hostId)
+      if (host) {
+        const client = await getIncusClient(host)
+        await patchInstanceResources(client, completedUpgrade.incusId, { cpu: completedUpgrade.cpu, memory: completedUpgrade.memory, disk: completedUpgrade.disk })
+      }
+    } catch (error) {
+      console.error(`[PlanUpgrade] Database upgrade fulfilled but Incus sync failed for order ${orderNo}:`, error)
+    }
+    try {
+      const { reconcileTrafficStateForInstanceIds } = await import('../services/traffic-scheduler.js')
+      await reconcileTrafficStateForInstanceIds([completedUpgrade.instanceId])
+    } catch (error) {
+      console.warn(`[PlanUpgrade] Traffic state reconciliation failed for order ${orderNo}:`, error)
+    }
+  }
   return result
 }
 
@@ -414,15 +446,21 @@ export async function failRecharge(
   callbackData?: Record<string, unknown>,
   paymentDetails?: Record<string, unknown>
 ): Promise<RechargeRecord> {
-  return prisma.rechargeRecord.update({
-    where: { orderNo },
-    data: {
-      status: 'failed',
-      failReason,
-      callbackData: callbackData as any,
-      callbackAt: new Date(),
-      paymentDetails: paymentDetails as any
+  return prisma.$transaction(async tx => {
+    const record = await tx.rechargeRecord.update({
+      where: { orderNo },
+      data: {
+        status: 'failed',
+        failReason,
+        callbackData: callbackData as any,
+        callbackAt: new Date(),
+        paymentDetails: paymentDetails as any
+      }
+    })
+    if (isPlanUpgradePaymentDetails(record.paymentDetails)) {
+      await (await import('./plan-upgrades.js')).releasePlanUpgradeReservation(record.orderNo, failReason, tx)
     }
+    return record
   })
 }
 
@@ -434,18 +472,24 @@ export async function cancelRecharge(
   callbackData?: Record<string, unknown>,
   paymentDetails?: Record<string, unknown>
 ): Promise<RechargeRecord> {
-  return prisma.rechargeRecord.update({
-    where: { orderNo },
-    data: {
-      status: 'cancelled',
-      paymentDetails: paymentDetails as any,
-      ...(callbackData
-        ? {
-            callbackData: callbackData as any,
-            callbackAt: new Date()
-          }
-        : {})
+  return prisma.$transaction(async tx => {
+    const record = await tx.rechargeRecord.update({
+      where: { orderNo },
+      data: {
+        status: 'cancelled',
+        paymentDetails: paymentDetails as any,
+        ...(callbackData
+          ? {
+              callbackData: callbackData as any,
+              callbackAt: new Date()
+            }
+          : {})
+      }
+    })
+    if (isPlanUpgradePaymentDetails(record.paymentDetails)) {
+      await (await import('./plan-upgrades.js')).releasePlanUpgradeReservation(record.orderNo, '支付已取消', tx)
     }
+    return record
   })
 }
 

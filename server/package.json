@@ -27,6 +27,7 @@
     "test:incus-compatibility": "node --import tsx scripts/test-incus-compatibility.ts",
     "test:maintenance-lifecycle": "node --import tsx scripts/test-maintenance-lifecycle.ts",
     "test:instance-audit": "node --import tsx scripts/test-instance-audit.ts",
+    "test:plan-upgrade": "node --import tsx scripts/test-plan-upgrade.ts",
     "test:installer-safety": "node --import tsx scripts/test-installer-safety.ts",
     "analyze:queries": "tsx scripts/analyze-queries.ts"
   },

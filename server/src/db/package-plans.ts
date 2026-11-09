@@ -100,6 +100,7 @@ export interface CreatePlanInput {
   isSoldOut?: boolean
   sortOrder?: number
   slaGuarantee?: number | null
+  maxInstances?: number | null
 }
 
 /**
@@ -126,7 +127,8 @@ export async function createPlan(input: CreatePlanInput): Promise<PackagePlan> {
     isActive = true,
     isSoldOut = false,
     sortOrder = 0,
-    slaGuarantee = null
+    slaGuarantee = null,
+    maxInstances = null
   } = input
 
   return prisma.packagePlan.create({
@@ -150,7 +152,8 @@ export async function createPlan(input: CreatePlanInput): Promise<PackagePlan> {
       isActive,
       isSoldOut,
       sortOrder,
-      slaGuarantee
+      slaGuarantee,
+      maxInstances
     }
   })
 }
@@ -177,6 +180,7 @@ export interface UpdatePlanInput {
   isSoldOut?: boolean
   sortOrder?: number
   slaGuarantee?: number | null
+  maxInstances?: number | null
 }
 
 /**

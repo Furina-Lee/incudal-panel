@@ -125,7 +125,7 @@ export function mergeHeleketPaymentDetails(
 
   return {
     ...existing,
-    kind: 'heleket',
+    kind: existing.kind === 'plan_upgrade' ? 'plan_upgrade' : 'heleket',
     heleket: {
       ...existing.heleket,
       orderId: fallback?.orderNo || existing.heleket?.orderId || null,

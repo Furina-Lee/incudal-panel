@@ -98,7 +98,7 @@ const isHighestPlan = computed(() => {
 const selectedProvider = computed(() => paymentProviders.value.find(provider => provider.id === selectedProviderId.value) || null)
 const selectedProviderMethods = computed(() => selectedProvider.value?.methods || [])
 const payableAmount = computed(() => preview.value?.payable ?? preview.value?.priceDiff ?? 0)
-const isPaid = (status: string) => ['paid', 'completed', 'success', 'succeeded'].includes(status.toLowerCase())
+const isPaid = (status: string) => ['fulfilled'].includes(status.toLowerCase())
 
 // 不能变更的原因文本
 const cannotChangeReasonText = computed(() => {
