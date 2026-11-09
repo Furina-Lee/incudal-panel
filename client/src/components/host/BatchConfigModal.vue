@@ -288,7 +288,7 @@ async function handleRetry() {
   }
 }
 
-// 复制失败的 Incus ID
+// 复制失败的 实例标识
 function copyFailedIncusIds() {
   if (!result.value?.failedItems) return
   const ids = result.value.failedItems.map(item => item.incusId).join('\n')
@@ -418,7 +418,7 @@ function normalizeStorageLimit(value: string): string | null {
                     <table class="w-full text-sm">
                       <thead class="sticky top-0" :class="themeStore.isDark ? 'bg-gray-800' : 'bg-gray-50'">
                         <tr>
-                          <th class="text-left px-3 py-2 text-themed-muted">Incus ID</th>
+                          <th class="text-left px-3 py-2 text-themed-muted">实例标识</th>
                           <th class="text-left px-3 py-2 text-themed-muted">{{ t('instance.name') }}</th>
                           <th class="text-left px-3 py-2 text-themed-muted">{{ t('host.batchConfig.errorReason') }}</th>
                         </tr>

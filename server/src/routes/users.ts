@@ -15,7 +15,7 @@ import {
     isOperationVerified,
     consumeOperationVerification
 } from '../lib/operation-verification.js'
-import { isSmtpEnabled, sendBanNotificationEmail, sendVerificationEmail } from '../lib/mailer.js'
+import { isSmtpEnabled, sendBanNotificationEmail, sendPasswordResetEmail, sendVerificationEmail } from '../lib/mailer.js'
 import { sendNotification } from '../lib/notifier.js'
 import { closeUserSessions } from '../lib/terminal-proxy.js'
 import { createVerificationCode, verifyCode } from '../db/email-verification.js'
@@ -1123,13 +1123,24 @@ export default async function userRoutes(fastify: FastifyInstance) {
     return { message: `已撤销 ${count} 个会话` }
   })
 
-  // 管理员重置用户密码（自动生成随机密码）
+  // 管理员重置用户密码（随机生成或自定义）
   fastify.post<{
     Params: { id: string }
+    Body: { mode?: 'random' | 'custom'; password?: string }
   }>('/:id/reset-password', {
-    onRequest: [fastify.authenticateAdmin]
+    onRequest: [fastify.authenticateAdmin],
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          mode: { type: 'string', enum: ['random', 'custom'] },
+          password: { type: 'string', minLength: 1, maxLength: 128 }
+        }
+      }
+    }
   }, async (request: FastifyRequest<{
     Params: { id: string }
+    Body: { mode?: 'random' | 'custom'; password?: string }
   }>, reply: FastifyReply) => {
     const userId = parseInt(request.params.id, 10)
     if (isNaN(userId)) {
@@ -1141,15 +1152,29 @@ export default async function userRoutes(fastify: FastifyInstance) {
       return reply.code(404).send(apiError(ErrorCode.USER_NOT_FOUND))
     }
 
-    // 生成随机密码：12位，包含大小写字母和数字
-    // 使用密码学安全的随机数生成器
-    const { generateRandomPassword } = await import('../lib/incus-config-generator.js')
-    const newPassword = generateRandomPassword(12)
+    const mode = request.body?.mode || 'random'
+    if (mode !== 'random' && mode !== 'custom') {
+      return reply.code(400).send(apiError(ErrorCode.INVALID_PARAMS, 'Invalid password reset mode'))
+    }
 
-    const passwordHash = await bcrypt.hash(newPassword, 12)
+    let newPassword = request.body?.password
+    if (mode === 'custom') {
+      if (!newPassword) {
+        return reply.code(400).send(apiError(ErrorCode.INVALID_PARAMS, 'Custom password is required'))
+      }
+      const passwordCheck = validatePassword(newPassword)
+      if (!passwordCheck.valid) {
+        return reply.code(400).send(apiError(ErrorCode.PASSWORD_TOO_WEAK, passwordCheck.message))
+      }
+    } else {
+      const { generateRandomPassword } = await import('../lib/incus-config-generator.js')
+      newPassword = generateRandomPassword(12)
+    }
+
+    const password = newPassword!
+    const passwordHash = await bcrypt.hash(password, 12)
     await db.updateUser(userId, { passwordHash })
 
-    // 撤销用户所有会话，强制重新登录
     await revokeAllUserRefreshTokens(userId)
     await invalidateUserAccessTokens(userId)
     closeUserSessions(userId, 'Password reset by admin')
@@ -1158,24 +1183,39 @@ export default async function userRoutes(fastify: FastifyInstance) {
       request.user.id,
       'user',
       'user.reset_password',
-      `Admin reset password for user "${user.username}" (ID: ${userId}) - new password generated`,
+      `Admin reset password for user "${user.username}" (ID: ${userId}, mode: ${mode})`,
       'success'
     )
 
-    // AUTH003: 管理员操作审计日志 - 重置密码是敏感操作
     await logAdminAction(request.user.id, 'user.reset_password', {
       ip: request.ip,
       userAgent: request.headers['user-agent'],
       targetUserId: userId,
       targetUsername: user.username,
       resourceType: 'credential',
+      metadata: { mode },
       reason: 'Admin initiated password reset'
     })
 
+    let emailSent = false
+    let emailError: string | undefined
+    if (user.email) {
+      const sendResult = await sendPasswordResetEmail(user.email, {
+        username: user.username,
+        newPassword: password,
+        twoFactorDisabled: false
+      })
+      emailSent = sendResult.success
+      emailError = sendResult.success ? undefined : sendResult.error
+    } else {
+      emailError = 'User has no email address'
+    }
+
     return {
-      message: 'Password reset successfully',
-      newPassword,
-      username: user.username
+      message: emailSent ? 'Password reset successfully. Email sent.' : 'Password reset successfully, but email could not be sent.',
+      username: user.username,
+      emailSent,
+      ...(emailSent ? {} : { emailError, newPassword })
     }
   })
 

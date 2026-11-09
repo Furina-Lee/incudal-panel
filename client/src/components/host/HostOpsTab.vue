@@ -1479,7 +1479,7 @@ async function runAuditKillProcess() {
               <div class="text-sm font-medium text-themed">{{ t('admin.hosts.ops.discover') }}</div>
               <div class="text-xs text-themed-muted mt-1">{{ t('admin.hosts.ops.discoverHint') }}</div>
             </div>
-            <span class="badge badge-info">Incus</span>
+            <span class="badge badge-info">运行环境</span>
           </div>
           <button class="btn-primary btn-sm w-full" :disabled="loadingAction !== ''" @click="runDiscover">
             <span>{{ loadingAction === 'discover' ? '...' : t('admin.hosts.ops.discover') }}</span>
@@ -1525,7 +1525,7 @@ async function runAuditKillProcess() {
       <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <div class="rounded-xl p-4" :class="themeStore.isDark ? 'bg-gray-900' : 'bg-gray-50'">
           <div class="text-xs text-themed-muted">{{ t('admin.hosts.ops.totalIncus') }}</div>
-          <div class="text-2xl font-semibold mt-1 text-themed">{{ discoverResult.summary.totalIncus }}</div>
+          <div class="text-2xl font-semibold mt-1 text-themed">{{ discoverResult.summary.totalIncus}}</div>
         </div>
         <div class="rounded-xl p-4" :class="themeStore.isDark ? 'bg-gray-900' : 'bg-gray-50'">
           <div class="text-xs text-themed-muted">{{ t('admin.hosts.ops.totalDb') }}</div>
@@ -1584,7 +1584,7 @@ async function runAuditKillProcess() {
           <div v-if="discoverResult.missing.length" class="space-y-2 max-h-96 overflow-auto">
             <div v-for="item in discoverResult.missing" :key="`${item.dbId}-${item.incusId}`" class="rounded-lg px-3 py-2 text-sm" :class="themeStore.isDark ? 'bg-gray-900' : 'bg-gray-50'">
               <div class="font-medium text-themed">{{ item.dbName }}</div>
-              <div class="text-xs text-themed-muted mt-1">ID #{{ item.dbId }} · Incus: {{ item.incusId }} · {{ t('admin.hosts.ops.dbStatus') }}: {{ item.dbStatus }}</div>
+              <div class="text-xs text-themed-muted mt-1">ID #{{ item.dbId }} · 实例标识：{{ item.incusId }} · {{ t('admin.hosts.ops.dbStatus') }}: {{ item.dbStatus }}</div>
             </div>
           </div>
           <div v-else class="text-sm text-themed-muted">{{ t('admin.hosts.ops.noMissing') }}</div>

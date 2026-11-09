@@ -483,6 +483,8 @@ function getPaymentMethodName(method: string): string {
     qqpay: t('wallet.paymentMethods.qqpay'),
     bank: t('wallet.paymentMethods.bank'),
     jdpay: t('wallet.paymentMethods.jdpay'),
+    'usdt.tron': t('wallet.paymentMethods.usdtTrc20'),
+    USDT_TRC20: t('wallet.paymentMethods.usdtTrc20'),
   }
   if (map[method]) {
     return map[method]
@@ -1829,7 +1831,7 @@ function formatAmount() {
             </div>
 
             <!-- 支付方式选择 (仅当所选渠道支持多种方式时显示) -->
-            <div v-if="selectedProviderInfo && selectedProviderInfo.type !== 'heleket' && selectedProviderInfo.methods && selectedProviderInfo.methods.length > 1">
+            <div v-if="selectedProviderInfo && selectedProviderInfo.type !== 'heleket' && selectedProviderInfo.methods && selectedProviderInfo.methods.length > 0">
               <label class="label text-xs uppercase tracking-wide text-themed-muted mb-2">{{ $t('wallet.paymentMethodType') }}</label>
               <div class="grid grid-cols-2 gap-3">
                 <button

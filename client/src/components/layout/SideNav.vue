@@ -81,6 +81,7 @@ const adminOnlyMenuItems: MenuItem[] = [
   { divider: true, label: 'nav.admin' },
   { name: 'admin-settings', path: '/admin/settings', icon: 'cog', label: 'nav.system' },
   { name: 'admin-users', path: '/admin/users', icon: 'users', label: 'nav.users' },
+  { name: 'admin-instances', path: '/admin/instances', icon: 'server', label: 'nav.adminInstances' },
   { name: 'admin-hosting', path: '/admin/hosting', icon: 'coin', label: 'nav.hosting' },
   { divider: true, label: 'nav.resources' },
   { name: 'my-hosts', path: '/resources/hosts', icon: 'database', label: 'nav.hosts' },

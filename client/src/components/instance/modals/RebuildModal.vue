@@ -28,7 +28,7 @@ interface Props {
 
 interface Emits {
   (e: 'update:visible', value: boolean): void
-  (e: 'submit', data: { image: string; sshKeyId: number; customInitCommandIds?: number[] }): void
+  (e: 'submit', data: { image: string; sshKeyId: number; customInitCommandIds?: number[]; initScript?: string }): void
 }
 
 const props = defineProps<Props>()
@@ -38,6 +38,9 @@ const themeStore = useThemeStore()
 const selectedImage = ref<string>('')
 const selectedSshKeyId = ref<number | null>(null)
 const customInitCommandIds = ref<number[]>([])
+const initScript = ref('')
+const initScriptBytes = computed(() => new TextEncoder().encode(initScript.value).length)
+const initScriptTooLarge = computed(() => initScriptBytes.value > 64 * 1024)
 const isImageDropdownOpen = ref(false)
 const imageSearchQuery = ref('')
 
@@ -89,6 +92,7 @@ watch(
       selectedImage.value = ''
       selectedSshKeyId.value = null
       customInitCommandIds.value = []
+      initScript.value = ''
       isImageDropdownOpen.value = false
       imageSearchQuery.value = ''
     }
@@ -112,7 +116,8 @@ function handleSubmit(): void {
     emit('submit', { 
       image: selectedImage.value, 
       sshKeyId: selectedSshKeyId.value,
-      customInitCommandIds: customInitCommandIds.value.length > 0 ? customInitCommandIds.value : undefined
+      customInitCommandIds: customInitCommandIds.value.length > 0 ? customInitCommandIds.value : undefined,
+      initScript: initScript.value || undefined
     })
   }
 }
@@ -323,8 +328,22 @@ function close(): void {
             />
           </div>
 
+          <div>
+            <label class="block text-xs text-gray-500 mb-1.5">Temporary initialization script</label>
+            <textarea
+              v-model="initScript"
+              rows="6"
+              maxlength="65536"
+              class="input w-full font-mono text-sm"
+              placeholder="Optional shell script, executed once after initialization"
+            />
+            <p class="mt-1 text-xs" :class="initScriptTooLarge ? 'text-red-500' : (themeStore.isDark ? 'text-gray-500' : 'text-gray-400')">
+              {{ initScriptBytes.toLocaleString() }} / 65,536 bytes
+            </p>
+          </div>
+
           <!-- Manual start hint -->
-          <div 
+          <div
             class="p-3 rounded-lg"
             :class="themeStore.isDark ? 'bg-yellow-500/10 border border-yellow-500/20' : 'bg-yellow-50 border border-yellow-200'"
           >
@@ -343,7 +362,7 @@ function close(): void {
           <div class="flex justify-end gap-3 pt-2">
             <button type="button" class="btn-secondary" @click="close">{{ t('rebuildModal.cancel') }}</button>
             <button 
-              :disabled="loading || !selectedImage || !selectedSshKeyId || sshKeys.length === 0" 
+              :disabled="loading || !selectedImage || !selectedSshKeyId || sshKeys.length === 0 || initScriptTooLarge"
               class="btn-danger" 
               @click="handleSubmit"
             >

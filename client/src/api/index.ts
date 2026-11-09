@@ -259,6 +259,65 @@ export interface VipBenefitOverviewResponse {
   }
 }
 
+export interface AdminInstancesPage<T> {
+  items: T[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+}
+
+export interface AdminInstanceItem {
+  id: number
+  name: string
+  status: string
+  resources: { cpu: number; memory: number; disk: number }
+  isPaid: boolean
+  billingPrice: number | null
+  billingCycle: number | null
+  expiresAt: string | null
+  createdAt: string
+  user: { id: number; username: string }
+  host: { id: number; name: string; owner: { id: number; username: string; role: string }; source: 'official' | 'hosted' }
+  package: { id: number; name: string; owner: { id: number; username: string; role: string }; source: 'official' | 'hosted' } | null
+  plan: { id: number; name: string } | null
+}
+
+export interface AdminPackageItem {
+  id: number
+  name: string
+  active: boolean
+  globalShared: boolean
+  resources: { cpu: number; memory: number; disk: number }
+  instanceType: string
+  createdAt: string
+  owner: { id: number; username: string }
+  source: 'official' | 'hosted'
+  counts: { instances: number; plans: number; packageHosts: number }
+}
+
+export interface AdminPlanItem {
+  id: number
+  name: string
+  price: number
+  billingCycle: number
+  active: boolean
+  soldOut: boolean
+  resources: { cpu: number; memory: number; disk: number }
+  createdAt: string
+  package: { id: number; name: string; owner: { id: number; username: string; role: string }; source: 'official' | 'hosted' }
+  purchasedInstances: number
+}
+
+export interface AdminPurchaserItem {
+  id: number
+  username: string
+  status: string
+  paidInstanceCount: number
+  source: 'official' | 'hosted'
+  createdAt: string
+}
+
 // API 超时配置（毫秒）
 const TIMEOUT = {
   DEFAULT: 30000,           // 30秒 - 普通请求
@@ -717,9 +776,14 @@ const api = {
     recalculateQuota: (id: number): Promise<UserQuota> =>
       http.post(`/users/${id}/quota/recalculate`),
     delete: (id: number): Promise<void> => http.delete(`/users/${id}`),
-    // 管理员重置用户密码（自动生成）
-    resetPassword: (id: number): Promise<{ message: string; newPassword: string; username: string }> =>
-      http.post(`/users/${id}/reset-password`),
+    // 管理员重置用户密码（随机生成或自定义）
+    resetPassword: (id: number, data: { mode: 'random' | 'custom'; password?: string }): Promise<{
+      message: string
+      username: string
+      emailSent: boolean
+      emailError?: string
+      newPassword?: string
+    }> => http.post(`/users/${id}/reset-password`, data),
     // 管理员取消用户 2FA
     disable2FA: (id: number): Promise<{ message: string }> =>
       http.post(`/users/${id}/disable-2fa`),
@@ -862,7 +926,7 @@ const api = {
         newInstanceId?: number | null
       }
     }> => http.get(`/instances/tasks/${taskId}`),
-    rebuild: (id: number, data: { image: string; sshKeyId?: number; customInitCommandIds?: number[] }): Promise<{ message: string; taskId: number; status: string }> =>
+    rebuild: (id: number, data: { image: string; sshKeyId?: number; customInitCommandIds?: number[]; initScript?: string }): Promise<{ message: string; taskId: number; status: string }> =>
       http.post(`/instances/${id}/rebuild`, data),
     recreate: (id: number, data: { image: string; sshKeyId?: number; customInitCommandIds?: number[] }): Promise<{ message: string; taskId: number; status: string }> =>
       http.post(`/instances/${id}/recreate`, data),
@@ -3442,6 +3506,14 @@ const api = {
 
   // 管理员 API
   admin: {
+    // 管理员实例、套餐、方案与购买用户只读列表
+    adminInstances: {
+      list: (params: Record<string, unknown> = {}): Promise<AdminInstancesPage<AdminInstanceItem>> => http.get('/admin/instances', { params }),
+      packages: (params: Record<string, unknown> = {}): Promise<AdminInstancesPage<AdminPackageItem>> => http.get('/admin/instances/packages', { params }),
+      plans: (params: Record<string, unknown> = {}): Promise<AdminInstancesPage<AdminPlanItem>> => http.get('/admin/instances/plans', { params }),
+      purchasers: (params: Record<string, unknown> = {}): Promise<AdminInstancesPage<AdminPurchaserItem>> => http.get('/admin/instances/purchasers', { params })
+    },
+
     // ==================== 支付渠道管理 ====================
 
     // 获取支付渠道列表

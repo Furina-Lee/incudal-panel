@@ -17,13 +17,14 @@ import {
   stopInstance,
   restartInstance,
   rebuildInstance,
-  getInstanceState
+  getInstanceState,
+  execWithOutput
 } from '../lib/incus/incus-instances.js'
 import { listSnapshots, deleteSnapshot as deleteIncusSnapshot } from '../lib/incus/incus-snapshots.js'
 import { sendNotification } from '../lib/notifier.js'
 import { createLog } from '../db/logs.js'
 import * as db from '../db/index.js'
-import { updateInstanceTaskProgress, updateInstanceTaskStatus } from '../db/instance-tasks.js'
+import { updateInstanceTaskProgress, updateInstanceTaskStatus, clearInstanceTaskInitScript } from '../db/instance-tasks.js'
 import { closeInstanceSessions } from '../lib/terminal-proxy.js'
 import { generateIncusConfig, generateRandomPassword } from '../lib/incus-config-generator.js'
 import { encryptSensitiveData, decryptSensitiveData } from '../lib/security.js'
@@ -66,10 +67,10 @@ const LIGHT_TASK_CONCURRENCY = 5
 const LIGHT_TASK_NAMES = new Set(['start', 'stop', 'restart'])
 
 // 重量任务类型（需串行执行）
-const HEAVY_TASK_NAMES = new Set(['rebuild', 'clone', 'recreate', 'change_host'])
+const HEAVY_TASK_NAMES = new Set(['rebuild', 'clone', 'recreate', 'change_host', 'initialize'])
 
 // 重量任务类型数组（用于 Prisma 查询）
-const HEAVY_TASK_TYPES: InstanceTaskType[] = ['rebuild', 'clone', 'recreate', 'change_host' as InstanceTaskType]
+const HEAVY_TASK_TYPES: InstanceTaskType[] = ['rebuild', 'clone', 'recreate', 'change_host', 'initialize']
 const ALPINE_BUSY_UPDATE_CANCEL_AFTER_MS = 10_000
 
 let workerInterval: ReturnType<typeof setInterval> | null = null
@@ -130,6 +131,7 @@ export async function cleanupStaleTasks(): Promise<void> {
     data: {
       status: 'FAILED',
       error: '系统重启，任务中断',
+      initScript: null,
       finishedAt: new Date()
     }
   })
@@ -163,6 +165,7 @@ async function cleanupTimeoutTasks(): Promise<void> {
     data: {
       status: 'FAILED',
       error: '任务执行超时',
+      initScript: null,
       finishedAt: new Date()
     }
   })
@@ -462,6 +465,9 @@ async function executeTask(taskId: number): Promise<void> {
       case 'change_host':
         await executeChangeHostTask(task, instance, host, client)
         break
+      case 'initialize':
+        await executeInitializeTask(task, instance, client)
+        break
       default:
         throw new Error(`未知任务类型: ${task.taskType}`)
     }
@@ -470,6 +476,7 @@ async function executeTask(taskId: number): Promise<void> {
     await updateInstanceTaskStatus(taskId, 'COMPLETED', {
       finishedAt: new Date()
     })
+    await clearInstanceTaskInitScript(taskId)
 
     const taskDuration = Date.now() - taskStartTime
     console.log(`[InstanceTaskWorker] 任务 ${taskId} (${task.taskType}) 完成，耗时 ${taskDuration}ms`)
@@ -482,6 +489,7 @@ async function executeTask(taskId: number): Promise<void> {
       error: errorMessage,
       finishedAt: new Date()
     })
+    await clearInstanceTaskInitScript(taskId)
 
     // 记录连接池错误
     recordClientError(task.hostId)
@@ -816,10 +824,40 @@ async function executeRestartTask(
 }
 
 /**
+ * 执行一次性初始化脚本。脚本内容只在内存中解密，不打印脚本或命令输出。
+ */
+async function executeInitScript(
+  script: string,
+  instanceName: string,
+  taskId: number,
+  client: Awaited<ReturnType<typeof getIncusClient>>
+): Promise<void> {
+  if (!script.trim()) return
+
+  await updateInstanceTaskProgress(taskId, 'initializing')
+  const result = await execWithOutput(client, instanceName, ['/bin/sh', '-c', `set -e\n${script}`], {}, 15 * 60 * 1000)
+  const metadata = result.metadata as { return?: number; status?: string } | null
+  if (metadata && typeof metadata.return === 'number' && metadata.return !== 0) {
+    throw new Error('初始化脚本执行失败')
+  }
+}
+
+async function executeInitializeTask(
+  task: { initScript?: string | null; id: number },
+  instance: { incus_id: string },
+  client: Awaited<ReturnType<typeof getIncusClient>>
+): Promise<void> {
+  if (!task.initScript) return
+  const script = decryptSensitiveData(task.initScript)
+  if (!script) throw new Error('初始化脚本解密失败')
+  await executeInitScript(script, instance.incus_id, task.id, client)
+}
+
+/**
  * 执行重装任务
  */
 async function executeRebuildTask(
-  task: { id: number; userId: number; instanceId: number; imageAlias: string | null; sshKeyId: number | null; customInitCommandIds?: string | null },
+  task: { id: number; userId: number; instanceId: number; imageAlias: string | null; sshKeyId: number | null; customInitCommandIds?: string | null; initScript?: string | null },
   instance: { incus_id: string; name: string; user_id: number; image: string; network_mode: string; ipv4?: string | null; ipv6?: string | null; host_id: number; swap_enabled?: boolean; swap_size?: number | null },
   host: { name: string },
   client: Awaited<ReturnType<typeof getIncusClient>>
@@ -898,32 +936,6 @@ async function executeRebuildTask(
     console.warn(`[Rebuild] Instance ${task.instanceId} has no SSH key; continuing without injecting authorized_keys`)
   }
 
-  // 处理自定义初始化命令
-  let extraShellCommands: string | undefined
-  if (task.customInitCommandIds) {
-    try {
-      const commandIds = JSON.parse(task.customInitCommandIds) as number[]
-      if (commandIds.length > 0) {
-        const commands = await getCommandsByIds(commandIds)
-        // 二次验证：过滤掉不属于实例用户或已禁用的命令（防止任务排队期间命令被删除/禁用）
-        const validCmds = commands.filter(cmd =>
-          cmd.userId === instance.user_id && cmd.enabled
-        )
-        // 筛选适配当前发行版的命令
-        const imageDistro = getImageDistroFromAlias(imageAlias)
-        const compatibleCmds = validCmds.filter(cmd => {
-          return cmd.distros.includes('all') || cmd.distros.includes(imageDistro)
-        })
-        if (compatibleCmds.length > 0) {
-          extraShellCommands = mergeCommandContents(compatibleCmds)
-          console.log(`[Rebuild] 应用 ${compatibleCmds.length} 条自定义初始化命令`)
-        }
-      }
-    } catch (err) {
-      console.warn('[Rebuild] 解析自定义初始化命令失败:', err)
-    }
-  }
-
   const newPassword = generateRandomPassword(16)
 
   // 获取实例类型 (container 或 virtual-machine)
@@ -945,8 +957,7 @@ async function executeRebuildTask(
       dns: ['10.10.0.1'],
       ipv6Address: instance.ipv6 ? `${instance.ipv6}/128` : undefined,
       ipv6Gateway: instance.ipv6 ? 'fe80::1' : undefined
-    } : undefined,
-    extraShellCommands
+    } : undefined
   })
 
   // VM 需要在 cloud-init 的 network-config 中配置网络
@@ -967,8 +978,7 @@ async function executeRebuildTask(
         dns: ['10.10.0.1'],
         ipv6Address: instance.ipv6 ? `${instance.ipv6}` : undefined,
         ipv6Gateway: instance.ipv6 ? (hostInfo?.ipv6_gateway || undefined) : undefined
-      } : undefined,
-      extraShellCommands
+      } : undefined
     })
     configPayload = vmResult.configPayload
     console.log(`[Rebuild] VM network-config 已更新: IPv4=${instance.ipv4 || 'dhcp'}, IPv6=${instance.ipv6 || 'none'}`)
@@ -1140,6 +1150,10 @@ async function executeRebuildTask(
   }
 
   await db.updateInstanceStatus(task.instanceId, 'running', { ipv4, ipv6 })
+  const temporaryScript = task.initScript ? decryptSensitiveData(task.initScript) : null
+  if (task.initScript && !temporaryScript) throw new Error('初始化脚本解密失败')
+  await executeInitScript(temporaryScript || '', instance.incus_id, task.id, client)
+
   const { reconcileTrafficStateForInstanceIds } = await import('../services/traffic-scheduler.js')
   await reconcileTrafficStateForInstanceIds([task.instanceId])
 

@@ -74,6 +74,10 @@ const showResetPasswordModal = ref(false)
 const showResetPasswordResultModal = ref(false)
 const resetPasswordUser = ref(null)
 const generatedPassword = ref('')
+const resetPasswordMode = ref('random')
+const customResetPassword = ref('')
+const resetPasswordEmailSent = ref(false)
+const resetPasswordEmailError = ref('')
 const resetPasswordLoading = ref(false)
 const passwordCopied = ref(false)
 
@@ -381,19 +385,41 @@ function viewUserInstances(user) {
 // 打开重置密码确认弹窗
 function openResetPasswordModal(user) {
   resetPasswordUser.value = user
+  resetPasswordMode.value = 'random'
+  customResetPassword.value = ''
   showResetPasswordModal.value = true
 }
 
-// 重置密码（自动生成）
+function closeResetPasswordResultModal() {
+  showResetPasswordResultModal.value = false
+  generatedPassword.value = ''
+  resetPasswordEmailError.value = ''
+}
+
+// 重置密码
 async function resetPassword() {
+  if (!resetPasswordUser.value) return
+  if (resetPasswordMode.value === 'custom' && !customResetPassword.value) {
+    toast.error(t('admin.users.customPasswordRequired'))
+    return
+  }
+
   resetPasswordLoading.value = true
-  
   try {
-    const result = await api.users.resetPassword(resetPasswordUser.value.id)
-    generatedPassword.value = result.newPassword
+    const result = await api.users.resetPassword(resetPasswordUser.value.id, {
+      mode: resetPasswordMode.value,
+      ...(resetPasswordMode.value === 'custom' ? { password: customResetPassword.value } : {})
+    })
+    resetPasswordEmailSent.value = result.emailSent
+    resetPasswordEmailError.value = (result.emailError || '').slice(0, 300)
+    generatedPassword.value = result.emailSent ? '' : (result.newPassword || '')
+    customResetPassword.value = ''
     showResetPasswordModal.value = false
     showResetPasswordResultModal.value = true
     passwordCopied.value = false
+    if (result.emailSent) {
+      toast.success(t('admin.users.passwordResetEmailSent'))
+    }
   } catch (err) {
     toast.error(err.message)
   } finally {
@@ -1984,11 +2010,31 @@ function _getQuotaPercent(used, limit) {
                 </svg>
               </button>
             </div>
-            <div class="modal-body">
+            <div class="modal-body space-y-4">
               <p class="text-themed-secondary">
                 {{ t('admin.users.resetPasswordConfirm', { name: resetPasswordUser?.username }) }}
               </p>
-              <p class="text-sm text-themed-muted mt-2">{{ t('admin.users.resetPasswordHint') }}</p>
+              <div class="flex items-center gap-4 text-sm text-themed-secondary">
+                <label class="inline-flex items-center gap-2 cursor-pointer">
+                  <input v-model="resetPasswordMode" type="radio" value="random" />
+                  {{ t('admin.users.randomPassword') }}
+                </label>
+                <label class="inline-flex items-center gap-2 cursor-pointer">
+                  <input v-model="resetPasswordMode" type="radio" value="custom" />
+                  {{ t('admin.users.customPassword') }}
+                </label>
+              </div>
+              <div v-if="resetPasswordMode === 'custom'">
+                <input
+                  v-model="customResetPassword"
+                  type="password"
+                  autocomplete="new-password"
+                  class="input w-full"
+                  :placeholder="t('admin.users.customPasswordPlaceholder')"
+                />
+                <p class="text-xs text-themed-muted mt-1">{{ t('admin.users.passwordStrengthHint') }}</p>
+              </div>
+              <p class="text-sm text-themed-muted">{{ t('admin.users.resetPasswordHint') }}</p>
             </div>
             <div class="modal-footer">
               <button class="btn-secondary" @click="showResetPasswordModal = false">{{ t('common.cancel') }}</button>
@@ -2009,26 +2055,31 @@ function _getQuotaPercent(used, limit) {
     <Teleport to="body">
       <Transition name="modal">
         <div v-if="showResetPasswordResultModal" class="modal-overlay">
-          <div class="modal-backdrop" @click="showResetPasswordResultModal = false"></div>
+          <div class="modal-backdrop" @click="closeResetPasswordResultModal"></div>
           <div class="modal-content">
             <div class="modal-header">
-              <h3 class="modal-title">{{ t('admin.users.passwordResetSuccess') }}</h3>
-              <button class="text-themed-muted hover:text-themed" @click="showResetPasswordResultModal = false">
+              <h3 class="modal-title">{{ resetPasswordEmailSent ? t('admin.users.passwordResetEmailSent') : t('admin.users.passwordResetEmailFailed') }}</h3>
+              <button class="text-themed-muted hover:text-themed" @click="closeResetPasswordResultModal">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
             <div class="modal-body">
-              <p class="text-sm text-themed-secondary mb-3">{{ t('admin.users.newPasswordFor', { name: resetPasswordUser?.username }) }}</p>
-              <div class="bg-themed-tertiary rounded-lg p-4 font-mono text-lg text-center text-themed tracking-wider mb-3 select-all">
-                {{ generatedPassword }}
-              </div>
-              <p class="text-xs text-themed-muted text-center">{{ t('admin.users.copyPasswordHint') }}</p>
+              <p v-if="resetPasswordEmailSent" class="text-themed-secondary">{{ t('admin.users.passwordResetEmailSentHint') }}</p>
+              <template v-else>
+                <p class="text-themed-secondary">{{ t('admin.users.passwordResetEmailFailedHint') }}</p>
+                <p v-if="resetPasswordEmailError" class="text-xs text-themed-muted mt-2">{{ resetPasswordEmailError }}</p>
+                <p class="text-sm text-themed-secondary mt-4 mb-3">{{ t('admin.users.temporaryPasswordFor', { name: resetPasswordUser?.username }) }}</p>
+                <div class="bg-themed-tertiary rounded-lg p-4 font-mono text-lg text-center text-themed tracking-wider mb-3 select-all">
+                  {{ generatedPassword }}
+                </div>
+                <p class="text-xs text-themed-muted text-center">{{ t('admin.users.temporaryPasswordHint') }}</p>
+              </template>
             </div>
             <div class="modal-footer">
-              <button class="btn-secondary" @click="showResetPasswordResultModal = false">{{ t('common.close') }}</button>
-              <button class="btn-primary" @click="copyGeneratedPassword">
+              <button class="btn-secondary" @click="closeResetPasswordResultModal">{{ t('common.close') }}</button>
+              <button v-if="!resetPasswordEmailSent" class="btn-primary" @click="copyGeneratedPassword">
                 <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>

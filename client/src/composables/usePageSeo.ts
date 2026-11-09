@@ -99,7 +99,7 @@ function restoreDefaults(): void {
 
   const configStore = useConfigStore()
   const brandName = configStore.brandName?.trim() || 'Incudal'
-  const brandSubtitle = configStore.brandSubtitle?.trim() || '基于 Incus 的低价 NAT VPS'
+  const brandSubtitle = configStore.brandSubtitle?.trim() || '稳定易用的云主机服务'
   const brandLogoUrl = toAbsoluteUrl(configStore.brandLogoUrl?.trim() || '/incudal_logo.webp')
   const title = defaultTitle.replace(/Incudal/g, brandName)
   const description = defaultDescription || brandSubtitle

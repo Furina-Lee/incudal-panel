@@ -617,7 +617,7 @@ onBeforeUnmount(() => {
 
           <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
             <span>#{{ mergedInstance.id }}</span>
-            <span>Incus {{ mergedInstance.incusId || '-' }}</span>
+            <span>实例 {{ mergedInstance.incusId || '-' }}</span>
             <span>{{ imageLabel }}</span>
             <span>{{ hostName }}</span>
             <span>{{ formatDateTime((mergedInstance as any).created_at || null) }}</span>

@@ -192,7 +192,7 @@ function getDetailError(id: number): string { return props.detailConfigErrors[id
 
                   <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" :class="textMuted(props.isDark)">
                     <span>#{{ instance.id }}</span>
-                    <span>Incus {{ instance.incusId || instance.incus_id || '-' }}</span>
+                    <span>实例 {{ instance.incusId || instance.incus_id || '-' }}</span>
                     <span>{{ instance.imageName || instance.image?.replace(/^images:/, '') || '-' }}</span>
                     <span>{{ props.formatDateTime(instance.createdAt || instance.created_at || null) }}</span>
                   </div>
@@ -269,7 +269,7 @@ function getDetailError(id: number): string { return props.detailConfigErrors[id
               <div class="mb-4 text-xs font-semibold uppercase tracking-[0.2em]" :class="textMuted(props.isDark)">{{ t('common.details') }}</div>
               <dl class="space-y-3 text-sm">
                 <div class="flex items-start justify-between gap-4"><dt class="text-themed-muted">{{ t('instance.detail.info.instanceId') }}</dt><dd class="font-mono text-right text-themed">{{ instance.id }}</dd></div>
-                <div class="flex items-start justify-between gap-4"><dt class="text-themed-muted">Incus ID</dt><dd class="font-mono text-right text-themed break-all">{{ instance.incusId || instance.incus_id || '-' }}</dd></div>
+                <div class="flex items-start justify-between gap-4"><dt class="text-themed-muted">实例标识</dt><dd class="font-mono text-right text-themed break-all">{{ instance.incusId || instance.incus_id || '-' }}</dd></div>
                 <div class="flex items-start justify-between gap-4"><dt class="text-themed-muted">{{ t('packageForm.fields.networkMode') }}</dt><dd class="text-right text-themed">{{ props.getNetworkModeLabel(instance) }}</dd></div>
                 <div class="flex items-start justify-between gap-4"><dt class="text-themed-muted">{{ t('packageForm.fields.instanceType') }}</dt><dd class="text-right text-themed">{{ props.getInstanceTypeLabel(instance) }}</dd></div>
                 <div class="flex items-start justify-between gap-4"><dt class="text-themed-muted">{{ t('instance.user') }}</dt><dd class="text-right text-themed">{{ instance.username || '-' }}</dd></div>

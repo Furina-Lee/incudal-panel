@@ -530,8 +530,8 @@ async function submitEdit() {
                     v-model="importSource"
                     type="text"
                     class="input"
-                    :placeholder="importDriver === 'zfs' ? 'incus-pool' :
-                      importDriver === 'lvm' ? 'incus-vg' :
+                    :placeholder="importDriver === 'zfs' ? 'storage-pool' :
+                      importDriver === 'lvm' ? 'storage-vg' :
                       importDriver === 'btrfs' ? '/dev/sdb' :
                       '/mnt/storage'"
                   />
@@ -586,7 +586,7 @@ async function submitEdit() {
                   </div>
                   <div>
                     <label class="block text-xs text-themed-muted mb-1.5">{{ t('admin.hosts.storage.zfsPoolName') }}</label>
-                    <input v-model="form.zfsPoolName" type="text" class="input" placeholder="incus-pool" />
+                    <input v-model="form.zfsPoolName" type="text" class="input" placeholder="storage-pool" />
                     <p class="text-xs text-themed-muted mt-1">{{ t('admin.hosts.storage.zfsPoolNameHint') }}</p>
                   </div>
                 </template>
@@ -620,7 +620,7 @@ async function submitEdit() {
                   </div>
                   <div>
                     <label class="block text-xs text-themed-muted mb-1.5">{{ t('admin.hosts.storage.lvmVgName') }}</label>
-                    <input v-model="form.lvmVgName" type="text" class="input" placeholder="incus-vg" />
+                    <input v-model="form.lvmVgName" type="text" class="input" placeholder="storage-vg" />
                   </div>
                   <div class="flex items-center gap-2">
                     <input id="lvmUseThinpool" v-model="form.lvmUseThinpool" type="checkbox" class="checkbox" />
@@ -662,7 +662,7 @@ async function submitEdit() {
                 <template v-if="form.driver === 'dir'">
                   <div>
                     <label class="block text-xs text-themed-muted mb-1.5">{{ t('admin.hosts.storage.dirPath') }}</label>
-                    <input v-model="form.source" type="text" class="input" placeholder="/mnt/data/incus-storage" />
+                    <input v-model="form.source" type="text" class="input" placeholder="/mnt/data/cloud-storage" />
                     <p class="text-xs text-themed-muted mt-1">{{ t('admin.hosts.storage.dirPathHint') }}</p>
                   </div>
                 </template>

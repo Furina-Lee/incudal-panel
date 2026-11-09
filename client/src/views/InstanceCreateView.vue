@@ -127,6 +127,7 @@ interface InstanceForm {
   authMethod: 'password' | 'ssh_key'
   sshKeyId: number | null
   customInitCommandIds: number[]  // 用户自定义初始化命令
+  initScript: string
   promoCode: string  // 优惠码
 }
 
@@ -142,8 +143,12 @@ const form = ref<InstanceForm>({
   authMethod: 'password',
   sshKeyId: null,
   customInitCommandIds: [],
+  initScript: '',
   promoCode: ''
 })
+
+const initScriptBytes = computed(() => new TextEncoder().encode(form.value.initScript).length)
+const initScriptTooLarge = computed(() => initScriptBytes.value > 64 * 1024)
 
 // 优惠码验证状态
 const promoCodeVerifying = ref(false)
@@ -367,6 +372,7 @@ const canSubmit = computed<boolean>(() => {
          !!form.value.image &&
          availableImages.value.length > 0 &&
          (form.value.authMethod === 'password' || (sshKeys.value.length > 0 && form.value.sshKeyId !== null)) &&
+         new TextEncoder().encode(form.value.initScript).length <= 64 * 1024 &&
          quotaCheck.value.valid &&
          resourceLimitCheck.value.valid &&
          !submitting.value &&
@@ -959,6 +965,7 @@ async function handleSubmit(): Promise<void> {
       authMethod: form.value.authMethod,
       ...(form.value.authMethod === 'ssh_key' && form.value.sshKeyId !== null ? { sshKeyId: form.value.sshKeyId } : {}),
       customInitCommandIds: form.value.customInitCommandIds.length > 0 ? form.value.customInitCommandIds : undefined,
+      initScript: form.value.initScript || undefined,
       promoCode: (isPaidPackage.value && promoCodeValid.value && form.value.promoCode.trim()) ? form.value.promoCode.trim() : undefined
     } as CreateInstanceRequest & { promoCode?: string })
     
@@ -1129,8 +1136,21 @@ async function handleSubmit(): Promise<void> {
               :empty-message="getCreatePageText('noImages')"
               @update:selected-image="form.image = $event"
             />
-            <div v-if="form.image" class="card p-5">
+            <div v-if="form.image" class="card p-5 space-y-4">
               <InitCommandSelector v-model="form.customInitCommandIds" :distro="selectedImageDistro" />
+              <div>
+                <label class="block text-sm font-medium text-themed mb-1">Temporary initialization script</label>
+                <textarea
+                  v-model="form.initScript"
+                  rows="6"
+                  maxlength="65536"
+                  class="input w-full font-mono text-sm"
+                  placeholder="Optional shell script, executed once after initialization"
+                />
+                <p class="mt-1 text-xs" :class="initScriptTooLarge ? 'text-red-500' : 'text-themed-muted'">
+                  {{ initScriptBytes.toLocaleString() }} / 65,536 bytes
+                </p>
+              </div>
             </div>
             <section class="card p-5 space-y-4">
               <div class="flex items-start justify-between gap-3">

@@ -73,7 +73,7 @@ export async function initSystemConfig(): Promise<void> {
         { key: 'free_site_register_gift_balance', value: '0', type: 'number', label: '注册赠送余额', description: '白嫖站注册自动赠送的账户余额（元）' },
         { key: 'free_site_register_gift_points', value: '0', type: 'number', label: '注册赠送积分', description: '白嫖站注册自动赠送的积分数量' },
         { key: 'brand_name', value: 'Incudal', type: 'string', label: '系统名称', description: '站点顶部、登录页、SEO 等位置展示的系统名称，留空则使用默认值' },
-        { key: 'brand_subtitle', value: '基于 Incus 的低价 NAT VPS', type: 'string', label: '网站副标题', description: '站点顶部、公共页、SEO 默认描述等位置展示的品牌副标题，留空则使用默认值' },
+        { key: 'brand_subtitle', value: '稳定易用的云主机服务', type: 'string', label: '网站副标题', description: '站点顶部、公共页、SEO 默认描述等位置展示的品牌副标题，留空则使用默认值' },
         { key: 'brand_logo_url', value: '/incudal_logo.webp', type: 'string', label: '系统 Logo 地址', description: '站点顶部、登录页、SEO 等位置展示的 Logo 图片地址，留空则使用默认值' },
         { key: 'popup_announcement', value: '', type: 'string', label: '弹窗公告', description: '用户访问网站时弹出的公告内容，留空则不广播' },
         { key: 'popup_promo_image_url', value: '', type: 'string', label: '图片推广弹窗图片', description: '用户访问网站时弹出的套餐推广图片 URL，留空则不显示图片推广弹窗' },

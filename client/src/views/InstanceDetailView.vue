@@ -1426,7 +1426,7 @@ async function loadSshKeys(): Promise<void> {
   }
 }
 
-async function doRebuild(data: { image: string; sshKeyId: number; customInitCommandIds?: number[] }): Promise<void> {
+async function doRebuild(data: { image: string; sshKeyId: number; customInitCommandIds?: number[]; initScript?: string }): Promise<void> {
   if (!data.image || !data.sshKeyId || !instance.value) {
     toast.error(t('instance.detail.actions.selectImageAndKey'))
     return
@@ -1437,7 +1437,8 @@ async function doRebuild(data: { image: string; sshKeyId: number; customInitComm
     const response = await api.instances.rebuild(instance.value.id, {
       image: data.image,
       sshKeyId: data.sshKeyId,
-      customInitCommandIds: data.customInitCommandIds
+      customInitCommandIds: data.customInitCommandIds,
+      initScript: data.initScript
     })
     toast.success(t('instance.detail.actions.taskQueued'))
     showRebuildModal.value = false

@@ -394,7 +394,7 @@ onMounted(() => {
             <div class="mt-6 rounded-2xl p-5 font-mono text-xs leading-6" :class="ui.terminalCard">
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <span>root@incudal</span>
-                <span :class="ui.terminalMeta">incus console</span>
+                <span :class="ui.terminalMeta">cloud console</span>
               </div>
               <div class="mt-4 space-y-1">
                 <div>{{ t('publicSite.portal.controlPoint1') }}</div>

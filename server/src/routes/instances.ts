@@ -881,6 +881,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
       sshKey?: string
       password?: string
       customInitCommandIds?: number[]  // 用户自定义初始化命令 ID 列表
+      initScript?: string // 一次性初始化脚本
       promoCode?: string  // AFF 优惠码
     }
   }>('/', {
@@ -902,6 +903,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
           sshKey: { type: 'string' },
           password: { type: 'string' },
           customInitCommandIds: { type: 'array', items: { type: 'integer' }, maxItems: 20 },
+          initScript: { type: 'string', maxLength: 65536 },
           promoCode: { type: 'string', maxLength: 32 }
         }
       }
@@ -921,10 +923,11 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
       sshKey?: string
       password?: string
       customInitCommandIds?: number[]
+      initScript?: string
       promoCode?: string  // AFF 优惠码
     }
   }>, reply: FastifyReply) => {
-    const { name, packageId, planId, image, cpu, memory, disk, hostId, sshKeyId, authMethod: requestedAuthMethod, customInitCommandIds, promoCode } = request.body
+    const { name, packageId, planId, image, cpu, memory, disk, hostId, sshKeyId, authMethod: requestedAuthMethod, customInitCommandIds, initScript, promoCode } = request.body
     let { sshKey } = request.body
     const { user } = request
     const authMethod = requestedAuthMethod ?? (sshKeyId ? 'ssh_key' : 'password')
@@ -1238,13 +1241,17 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
         return cmd.distros.includes('all') || cmd.distros.includes(imageDistro)
       })
 
-      // 如果有不兼容的命令，跳过它们（不报错，只用兼容的）
+      if (compatibleCmds.length !== cmdValidation.commands.length) {
+        return reply.code(400).send({ error: 'Selected init templates are incompatible with the selected image', code: 'INIT_TEMPLATE_DISTRO_MISMATCH' })
+      }
       if (compatibleCmds.length > 0) {
         extraShellCommands = mergeCommandContents(compatibleCmds)
-        console.log(`[Provisioning] 应用 ${compatibleCmds.length} 条自定义初始化命令`)
       }
     }
 
+    if (initScript && Buffer.byteLength(initScript, 'utf8') > 64 * 1024) {
+      return reply.code(400).send({ error: 'Initialization script exceeds 64KB', code: 'INIT_SCRIPT_TOO_LARGE' })
+    }
     // ==================== 阶段三: 生成配置 =====================
     // SSH 端口固定为 22（不再使用随机端口）
     const autoPassword = generateRandomPassword(16)
@@ -1254,8 +1261,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
       rootPassword: autoPassword,
       sshKey: sshKey,
       networkMode,
-      type: effectiveInstanceType === 'vm' ? 'virtual-machine' : 'container',
-      extraShellCommands
+      type: effectiveInstanceType === 'vm' ? 'virtual-machine' : 'container'
     })
 
     // ==================== 阶段四: 标识符生成 ====================
@@ -1723,8 +1729,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
           dns: ['10.10.0.1'],
           ipv6Address: staticIPv6 ? `${staticIPv6}` : undefined,
           ipv6Gateway: staticIPv6 ? (hostWithIpv6.ipv6_gateway || undefined) : undefined
-        } : undefined,
-        extraShellCommands
+        } : undefined
       })
       finalConfigPayload = vmResult.configPayload
       console.log(`[Provisioning] VM network-config 已更新: IPv4=${staticIPv4 || 'dhcp'}, IPv6=${staticIPv6 || 'none'}`)
@@ -1743,8 +1748,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
           dns: ['10.10.0.1'],
           ipv6Address: staticIPv6 ? `${staticIPv6}/128` : undefined,
           ipv6Gateway: staticIPv6 ? 'fe80::1' : undefined
-        },
-        extraShellCommands
+        }
       })
       finalConfigPayload = containerResult.configPayload
       console.log(`[Provisioning] Container network-config 已更新: IPv4=${staticIPv4}, IPv6=${staticIPv6 || 'none'}`)
@@ -1798,6 +1802,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
       swapEnabled: false,
       swapSize: effectiveInstanceType === 'container' ? (selectedPlan?.swapSize ?? null) : null,
       cloudInitConfig: finalConfigPayload,
+      initScript: initScript?.trim() ? encryptSensitiveData(initScript.trim()) : undefined,
       networkMode,
       nested: Boolean(pkg.nested),
       privileged: Boolean(pkg.privileged),
@@ -3111,7 +3116,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
   // 重装系统
   fastify.post<{
     Params: { id: string }
-    Body: { image: string; sshKeyId?: number; imageAlias?: string; customInitCommandIds?: number[] }
+    Body: { image: string; sshKeyId?: number; imageAlias?: string; customInitCommandIds?: number[]; initScript?: string }
   }>('/:id/rebuild', {
     onRequest: [fastify.authenticateUser],
     schema: {
@@ -3121,13 +3126,14 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
           image: { type: 'string' },
           imageAlias: { type: 'string' },
           sshKeyId: { type: 'integer' },
-          customInitCommandIds: { type: 'array', items: { type: 'integer' }, maxItems: 20 }
+          customInitCommandIds: { type: 'array', items: { type: 'integer' }, maxItems: 20 },
+          initScript: { type: 'string', maxLength: 65536 }
         }
       }
     }
   }, async (request: FastifyRequest<{
     Params: { id: string }
-    Body: { image: string; sshKeyId?: number; imageAlias?: string; customInitCommandIds?: number[] }
+    Body: { image: string; sshKeyId?: number; imageAlias?: string; customInitCommandIds?: number[]; initScript?: string }
   }>, reply: FastifyReply) => {
     const { id } = request.params
     const instanceId = Number(id)
@@ -3218,7 +3224,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
     }
 
     // 验证 SSH 密钥（如果提供）
-    const { sshKeyId, customInitCommandIds } = request.body
+    const { sshKeyId, customInitCommandIds, initScript } = request.body
     if (sshKeyId) {
       const keyRecord = await db.getSSHKeyById(sshKeyId)
       if (!keyRecord || keyRecord.user_id !== user.id) {
@@ -3227,14 +3233,25 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
     }
 
     // 验证自定义初始化命令（如果提供）
+    let extraInitCommands: string[] = []
     if (customInitCommandIds && customInitCommandIds.length > 0) {
       const cmdValidation = await validateCommandsOwnership(customInitCommandIds, user.id)
       if (!cmdValidation.valid) {
         return reply.code(400).send({ error: 'Invalid custom init command IDs', code: 'INVALID_COMMAND_IDS' })
       }
+      const imageDistro = getImageDistroFromAlias(imageAlias)
+      if (cmdValidation.commands.some(cmd => !cmd.distros.includes('all') && !cmd.distros.includes(imageDistro))) {
+        return reply.code(400).send({ error: 'Selected init templates are incompatible with the selected image', code: 'INIT_TEMPLATE_DISTRO_MISMATCH' })
+      }
+      extraInitCommands = cmdValidation.commands.map(command => command.command)
+    }
+
+    if (initScript && Buffer.byteLength(initScript, 'utf8') > 64 * 1024) {
+      return reply.code(400).send({ error: 'Initialization script exceeds 64KB', code: 'INIT_SCRIPT_TOO_LARGE' })
     }
 
     // 创建异步任务
+    const taskScript = [extraInitCommands.join('\n'), initScript?.trim()].filter(Boolean).join('\n')
     const task = await createInstanceTask({
       instanceId,
       hostId: instance.host_id,
@@ -3242,7 +3259,8 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
       taskType: 'rebuild',
       imageAlias,
       sshKeyId,
-      customInitCommandIds
+      customInitCommandIds,
+      initScript: taskScript ? encryptSensitiveData(taskScript) : undefined
     })
 
     await createLog(user.id, 'instance', 'instance.rebuild', `Queued rebuild task for instance "${instance.name}" with image ${imageAlias}`, 'success', { instanceId })
@@ -6057,6 +6075,7 @@ async function createInstanceAsync(
     swapEnabled?: boolean
     swapSize?: number | null
     cloudInitConfig?: Record<string, string>
+    initScript?: string
     networkMode: 'nat' | 'nat_ipv6' | 'nat_ipv6_nat' | 'ipv6_only' | 'ipv6_nat'
     nested?: boolean
     privileged?: boolean
@@ -6209,6 +6228,17 @@ async function createInstanceAsync(
       }
       // 不再继续后续流程（IP 记录、通知等）
       return
+    }
+
+    if (config.initScript) {
+      await createInstanceTask({
+        instanceId,
+        hostId: host.id,
+        userId,
+        taskType: 'initialize',
+        imageAlias: config.image,
+        initScript: config.initScript
+      })
     }
 
     // 创建 IP 地址记录 (新双网卡架构: eth0=IPv4, eth1=IPv6)

@@ -13,6 +13,7 @@ export interface CreateInstanceTaskData {
   imageAlias?: string       // 重装使用的镜像别名
   sshKeyId?: number         // 重装使用的 SSH 密钥 ID
   customInitCommandIds?: number[]  // 重装使用的自定义初始化命令 ID 列表
+  initScript?: string // 已加密的一次性初始化脚本
   targetName?: string       // 克隆的目标名称
   targetHostId?: number     // 克隆的目标宿主机
   snapshotName?: string     // 克隆时的快照名称
@@ -30,6 +31,7 @@ export interface InstanceTaskWithDetails {
   imageAlias: string | null
   sshKeyId: number | null
   customInitCommandIds: string | null  // JSON 字符串，解析后为 number[]
+  initScript: string | null
   targetName: string | null
   targetHostId: number | null
   snapshotName: string | null
@@ -54,6 +56,7 @@ export async function createInstanceTask(data: CreateInstanceTaskData): Promise<
       imageAlias: data.imageAlias || null,
       sshKeyId: data.sshKeyId || null,
       customInitCommandIds: data.customInitCommandIds ? JSON.stringify(data.customInitCommandIds) : null,
+      initScript: data.initScript || null,
       targetName: data.targetName || null,
       targetHostId: data.targetHostId || null,
       snapshotName: data.snapshotName || null,
@@ -148,6 +151,14 @@ export async function updateInstanceTaskProgress(taskId: number, progress: strin
   })
 }
 
+/** 清空一次性初始化脚本密文。 */
+export async function clearInstanceTaskInitScript(taskId: number): Promise<void> {
+  await prisma.instanceTask.update({
+    where: { id: taskId },
+    data: { initScript: null } as any
+  })
+}
+
 /**
  * 获取队列位置
  */
@@ -203,6 +214,7 @@ export async function cancelInstanceTask(taskId: number): Promise<InstanceTaskWi
     data: {
       status: 'FAILED',
       error: '用户取消',
+      initScript: null,
       finishedAt: new Date()
     }
   })

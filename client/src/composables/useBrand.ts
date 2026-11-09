@@ -8,7 +8,7 @@ export function useBrand() {
       return configStore.brandName?.trim() || 'Incudal'
     },
     get brandSubtitle() {
-      return configStore.brandSubtitle?.trim() || '基于 Incus 的低价 NAT VPS'
+      return configStore.brandSubtitle?.trim() || '稳定易用的云主机服务'
     },
     get brandLogoUrl() {
       return configStore.brandLogoUrl?.trim() || '/incudal_logo.webp'

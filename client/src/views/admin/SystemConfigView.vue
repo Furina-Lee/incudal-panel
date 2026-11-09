@@ -94,7 +94,7 @@ const form = ref({
   smtp_from_email: '',
   smtp_from_name: 'Incudal',
   brand_name: 'Incudal',
-  brand_subtitle: '基于 Incus 的低价 NAT VPS',
+  brand_subtitle: '稳定易用的云主机服务',
   brand_logo_url: '/incudal_logo.webp',
   // 邮箱域名白名单配置
   email_domain_whitelist_enabled: false,
@@ -1118,7 +1118,7 @@ async function sendTestEmail() {
                 v-model="form.brand_subtitle"
                 type="text"
                 class="input"
-                :placeholder="t('admin.system.brand.subtitlePlaceholder') || '基于 Incus 的低价 NAT VPS'"
+                :placeholder="t('admin.system.brand.subtitlePlaceholder') || '稳定易用的云主机服务'"
               />
               <p class="text-xs text-themed-muted">{{ t('admin.system.brand.subtitleDesc') || '显示在公开站头部/底部、浏览器默认标题和 SEO 默认描述中。' }}</p>
             </div>

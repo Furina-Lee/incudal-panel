@@ -547,6 +547,7 @@ export interface CreateInstanceRequest {
   snapshotLimit?: number
   backupLimit?: number
   customInitCommandIds?: number[]  // 用户自定义初始化命令 ID 列表
+  initScript?: string
 }
 
 export interface UpdateInstanceRequest {
@@ -1346,7 +1347,7 @@ export interface UpdateTerminalSavedCommandRequest {
 
 // ==================== 实例任务相关 ====================
 
-export type InstanceTaskType = 'start' | 'stop' | 'restart' | 'rebuild' | 'recreate' | 'clone' | 'change_host'
+export type InstanceTaskType = 'start' | 'stop' | 'restart' | 'rebuild' | 'recreate' | 'clone' | 'change_host' | 'initialize'
 export type InstanceTaskStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
 
 export interface InstanceTask {

@@ -28,6 +28,7 @@ import {
 } from '../lib/recharge-provider-snapshot.js'
 import { createLog } from '../db/logs.js'
 import { getTradeNoForIndex, isCallbackProcessed, markCallbackProcessed } from '../db/recharge-records.js'
+import { resolveRechargePaymentMethod } from '../lib/recharge-reliability.js'
 import { createInboxMessage } from '../db/inbox.js'
 import { sendRechargeSuccessEmail } from '../lib/mailer.js'
 
@@ -145,27 +146,7 @@ export function getProviderMethods(methods: unknown): string[] {
   return methods.filter((method): method is string => typeof method === 'string' && method.trim().length > 0)
 }
 
-export function resolveRechargePaymentMethod(
-  providerType: string,
-  methods: string[],
-  requestedMethod?: string | null
-): string | undefined {
-  const normalizedRequested = requestedMethod?.trim()
-
-  if (providerType === 'yipay') {
-    const availableMethods = methods.length > 0 ? methods : ['alipay']
-    if (normalizedRequested && availableMethods.includes(normalizedRequested)) {
-      return normalizedRequested
-    }
-    return availableMethods[0]
-  }
-
-  if (providerType === 'heleket') {
-    return normalizedRequested || undefined
-  }
-
-  return normalizedRequested || undefined
-}
+export { resolveRechargePaymentMethod }
 
 function normalizePublicBaseUrl(url: string): string {
   return url.trim().replace(/\/+$/, '')
@@ -669,6 +650,10 @@ export default async function rechargeRoutes(app: FastifyInstance): Promise<void
         payUrl
       }
     } catch (error) {
+      const statusCode = Number((error as { statusCode?: number })?.statusCode)
+      if (statusCode === 400) {
+        return reply.status(400).send({ error: (error as Error).message })
+      }
       request.log.error(error, '创建充值订单失败')
       return reply.status(500).send({ error: '创建充值订单失败' })
     }
@@ -908,6 +893,10 @@ export default async function rechargeRoutes(app: FastifyInstance): Promise<void
         payUrl
       }
     } catch (error) {
+      const statusCode = Number((error as { statusCode?: number })?.statusCode)
+      if (statusCode === 400) {
+        return reply.status(400).send({ error: (error as Error).message })
+      }
       request.log.error(error, '重新支付失败')
       return reply.status(500).send({ error: '重新支付失败' })
     }

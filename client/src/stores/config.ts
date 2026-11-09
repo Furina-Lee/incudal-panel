@@ -24,7 +24,7 @@ type PopupPromoPackage = {
 export const useConfigStore = defineStore('config', () => {
     const avatarApiBase = ref('https://api.dicebear.com/9.x')
     const brandName = ref('Incudal')
-    const brandSubtitle = ref('基于 Incus 的低价 NAT VPS')
+    const brandSubtitle = ref('稳定易用的云主机服务')
     const brandLogoUrl = ref('/incudal_logo.webp')
     const registrationEnabled = ref(true)
     const requireInviteCode = ref(true)
@@ -58,7 +58,7 @@ export const useConfigStore = defineStore('config', () => {
             turnstileSiteKey.value = config.turnstileSiteKey || null
             avatarApiBase.value = config.avatarApiBase || 'https://api.dicebear.com/9.x'
             brandName.value = config.brandName?.trim() || 'Incudal'
-            brandSubtitle.value = config.brandSubtitle?.trim() || '基于 Incus 的低价 NAT VPS'
+            brandSubtitle.value = config.brandSubtitle?.trim() || '稳定易用的云主机服务'
             brandLogoUrl.value = config.brandLogoUrl?.trim() || '/incudal_logo.webp'
             transferFee.value = config.transferFee || 0
             footerContactEmail.value = config.footerContactEmail ?? null

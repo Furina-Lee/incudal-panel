@@ -40,7 +40,7 @@ watchEffect(() => {
   const pageTitle = translatedTitle && translatedTitle !== titleKey ? translatedTitle : fallbackTitle
 
   const brandName = configStore.brandName?.trim() || 'Incudal'
-  const brandSubtitle = configStore.brandSubtitle?.trim() || '基于 Incus 的低价 NAT VPS'
+  const brandSubtitle = configStore.brandSubtitle?.trim() || '稳定易用的云主机服务'
   document.title = pageTitle ? `${brandName} - ${pageTitle}` : `${brandName} - ${brandSubtitle}`
 })
 

@@ -245,6 +245,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, requiresAdmin: true, titleKey: 'nav.users', title: '用户' }
   },
   {
+    path: '/admin/instances',
+    name: 'admin-instances',
+    component: () => import('@/views/admin/AdminInstancesView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, titleKey: 'nav.adminInstances', title: '实例与套餐' }
+  },
+  {
     path: '/admin/hosting',
     name: 'admin-hosting',
     component: () => import('@/views/admin/HostingView.vue'),

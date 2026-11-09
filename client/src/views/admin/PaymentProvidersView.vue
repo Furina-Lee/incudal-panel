@@ -41,7 +41,7 @@ const formData = ref({
 })
 
 const DEFAULT_YIPAY_METHODS = ['alipay', 'wxpay']
-const YIPAY_METHODS = ['alipay', 'wxpay', 'qqpay']
+const YIPAY_METHODS = ['alipay', 'wxpay', 'qqpay', 'usdt.tron']
 const IMPLEMENTED_PROVIDER_TYPES = new Set(['yipay', 'heleket'])
 
 function getConfigMethodFees(config: Record<string, unknown>): Record<string, { feeRate?: number; feeFixed?: number }> {
@@ -92,7 +92,7 @@ function getProviderMethodSummary(provider: any): string {
 
   return methods.map((method: string) => {
     const percent = getProviderMethodFeePercent(provider, method)
-    const name = t(`wallet.paymentMethods.${method}`)
+    const name = t(`wallet.paymentMethods.${method === 'usdt.tron' ? 'usdtTrc20' : method}`)
     const label = name === `wallet.paymentMethods.${method}` ? method : name
     return percent > 0 ? `${label} (${percent.toFixed(2)}%)` : label
   }).join(', ')

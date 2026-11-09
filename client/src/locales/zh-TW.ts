@@ -3,7 +3,7 @@
 export default {
     // 應用程式名稱
     app: {
-        name: 'Incus NAT VPS',
+        name: '虛擬化服務 雲主機',
         tagline: '簡潔而強大的雲端實例託管平台',
         description: '一個現代化的雲端實例託管平台',
     },
@@ -249,6 +249,7 @@ export default {
         myPackageEdit: '編輯方案',
         telegramSettings: 'Telegram 設定',
         adminCreateInstance: '管理員建立實例',
+        adminInstances: '全站實例',
     },
 
     status: {
@@ -340,7 +341,7 @@ export default {
     },
 
     publicSite: {
-        brandTagline: 'Incus 驅動的 NAT VPS 平台',
+        brandTagline: '穩定易用的雲主機服務',
         nav: {
             home: '首頁',
             overview: '概覽',
@@ -357,24 +358,24 @@ export default {
             viewCatalog: '查看全部',
         },
         footer: {
-            description: '精選全球多節點 LXC / KVM 商品，配置豐富、方案齊全，持續提供高性價比 NAT VPS 選擇。',
+            description: '精選全球多節點 LXC / KVM 商品，配置豐富、方案齊全，持續提供高性價比 雲主機 選擇。',
             explore: '瀏覽',
             account: '帳戶',
             purchaseHint: '未登入時打開購買連結，會先進入公開商品瀏覽頁；登入後仍維持原本的建立流程。',
         },
         seo: {
-            keywords: 'Incus,NAT VPS,LXC,KVM,VPS 面板,雲伺服器',
-            homeTitle: '基於 Incus 的 NAT VPS 入口與控制台',
-            homeDescription: '精選全球多節點 LXC / KVM 商品，配置豐富、方案齊全，持續提供高性價比 NAT VPS 選擇。',
+            keywords: '虛擬化服務,雲主機,LXC,KVM,VPS 面板,NAT伺服器',
+            homeTitle: '基於 虛擬化服務 的 雲主機 入口與控制台',
+            homeDescription: '精選全球多節點 LXC / KVM 商品，配置豐富、方案齊全，持續提供高性價比 雲主機 選擇。',
             marketTitle: '商品瀏覽',
-            marketDescription: '瀏覽全部公開商品，並依來源、地區、資源配置與計費方案篩選 NAT VPS。',
+            marketDescription: '瀏覽全部公開商品，並依來源、地區、資源配置與計費方案篩選 雲主機。',
             marketPackageTitle: '{name} - 商品瀏覽',
             marketPackageDescription: '查看 {name} 的 {type} 配置、月流量與商品資訊，並在商品瀏覽頁延續開通流程。',
         },
         portal: {
-            badge: 'Incus Driven NAT Platform',
-            title: '基於 Incus 的 NAT VPS 入口與控制台',
-            description: '精選全球多節點 LXC / KVM 商品，覆蓋直營與託管供給，配置檔位豐富，持續提供高性價比 NAT VPS 選擇。',
+            badge: '虛擬化服務 Driven NAT Platform',
+            title: '基於 虛擬化服務 的 雲主機 入口與控制台',
+            description: '精選全球多節點 LXC / KVM 商品，覆蓋直營與託管供給，配置檔位豐富，持續提供高性價比 雲主機 選擇。',
             authPanelDescription: '把穩定供給、更多地區與更豐富價格帶放在同一入口，讓挑選套餐這一步更直接。',
             authPanelFlowLabel: 'ORDER FLOW',
             authPanelFlowTitle: '先看商品，登入後繼續下單',
@@ -383,7 +384,7 @@ export default {
             previewLabel: 'CONTROL PLANE',
             previewTitle: '控制台概覽',
             previewDescription: '從公開入口到登入後控制台，整體體驗都圍繞實例選型、部署、維運與商品轉化。',
-            controlPoint1: '$ incus launch ubuntu:24.04 edge-vm',
+            controlPoint1: '$ platform launch ubuntu:24.04 edge-vm',
             controlPoint2: '# LXC / KVM NAT 實例統一入口',
             controlPoint3: '# 官方直營與託管市場共用同一套瀏覽到開通鏈路',
             packageFallback: '公開商品，支援從瀏覽頁直接跳轉購買。',
@@ -408,7 +409,7 @@ export default {
             experienceRoutingTitle: 'LXC / KVM 商品更全',
             experienceRoutingDescription: '從輕量容器到完整虛擬機，資源配置與方案檔位覆蓋更廣，方便依需求挑選。',
             experienceThemeTitle: '多價位高性價比',
-            experienceThemeDescription: '持續補充不同預算與定位的 NAT VPS 商品，方便橫向比較後再決定。',
+            experienceThemeDescription: '持續補充不同預算與定位的 雲主機 商品，方便橫向比較後再決定。',
             catalogLabel: 'ECOSYSTEM',
             catalogTitle: '官方直營與託管生態並行',
             catalogDescription: '直營與託管商品並行提供，無論你想優先看穩定供給，或是挑選更多地區與價格帶，都能在這裡找到。',
@@ -502,6 +503,7 @@ export default {
           qqpay: 'QQ錢包',
           bank: '網銀支付',
           jdpay: '京東支付',
+          usdtTrc20: 'USDT（TRC20）',
         },
         noProviders: '暫無可用支付渠道',
         amountLabel: '充值金額',
@@ -1795,8 +1797,8 @@ export default {
             trafficTotal: '總流量',
             trafficReset: '流量重設時間',
             bandwidth: '頻寬',
-            incusId: 'Incus ID',
-            incusIdHint: '實例在 Incus 中的唯一標識符',
+            incusId: '虛擬化服務 ID',
+            incusIdHint: '實例在 虛擬化服務 中的唯一標識符',
             currentUsage: '目前使用量',
             noCurrentUsage: '無法取得目前使用量',
             noTrafficInfo: '無流量資訊',
@@ -2611,10 +2613,10 @@ export default {
             retryFailed: '重試失敗項',
             failedDetails: '失敗詳情',
             instanceName: '實例名稱',
-            incusId: 'Incus ID',
+            incusId: '虛擬化服務 ID',
             errorReason: '錯誤原因',
-            copyIncusIds: '複製失敗的 Incus ID',
-            copiedIncusIds: '已複製 {count} 個 Incus ID',
+            copyIncusIds: '複製失敗的 虛擬化服務 ID',
+            copiedIncusIds: '已複製 {count} 個 虛擬化服務 ID',
             // 操作
             submit: '應用配置 ({count})',
             close: '關閉',
@@ -3582,6 +3584,19 @@ export default {
 
     // 管理後台
     admin: {
+        instances: {
+            title: '全站實例',
+            description: '查看直營與託管資源中的所有實例、套餐、方案與購買使用者。',
+            refresh: '重新整理',
+            loadFailed: '載入資源清單失敗',
+            empty: '沒有記錄',
+            active: '啟用',
+            inactive: '停用',
+            searchPlaceholder: '搜尋名稱、使用者或節點',
+            tabs: { instances: '實例', packages: '套餐', plans: '方案', purchasers: '購買使用者' },
+            sources: { all: '全部來源', official: '直營', hosted: '託管' },
+            columns: { instance: '實例', user: '使用者', host: '節點', package: '套餐', owner: '擁有者', usage: '實例 / 方案 / 節點', plan: '方案', price: '價格 / 週期 / 實例數', paidInstances: '付費實例', source: '來源' }
+        },
         statistics: {
             title: '統計',
             description: '使用者、實例和計費資料',
@@ -3900,7 +3915,7 @@ export default {
                 name: '系統名稱',
                 nameDesc: '顯示在側邊欄、頂部列、登入註冊頁和 SEO 資訊中。',
                 subtitle: '網站副標題',
-                subtitlePlaceholder: 'Incus 驅動的 NAT VPS 平台',
+                subtitlePlaceholder: '虛擬化服務 驅動的 雲主機 平台',
                 subtitleDesc: '顯示在公開站頭部/底部、瀏覽器預設標題和 SEO 預設描述中。',
                 logo: 'Logo 位址',
                 logoDesc: '支援 http(s) 圖片位址或站內絕對路徑，留空則使用預設 Logo。',
@@ -4389,7 +4404,7 @@ export default {
                 noMissing: '未發現資料庫異常實例',
                 baselineHint: '同步宿主機資源占用，並批次回填執行中實例的狀態與 IP。',
                 networkHint: '批次校準非刪除實例的狀態、IPv4 與 IPv6 記錄。',
-                discoverHint: '讀取宿主機當前所有 Incus 容器 / KVM，並與資料庫記錄對帳。',
+                discoverHint: '讀取宿主機當前所有 虛擬化服務 容器 / KVM，並與資料庫記錄對帳。',
                 selectInstanceHint: '從已納管實例中選擇一個對象，執行單實例同步、重啟或高風險動作。',
                 instancePanel: '單實例操作面板',
                 loadPreview: '載入預檢',
@@ -4554,9 +4569,9 @@ export default {
             // 宿主機狀態
             agentStatusTitle: '宿主機狀態',
             agentStatusDesc: 'Agent 按 {seconds} 秒間隔上報宿主機即時資源與執行狀態',
-            incusVersionLabel: 'Incus 版本',
-            incusApiLabel: 'Incus API',
-            incusCompatibilityTarget: '相容性目標：Incus {version}',
+            incusVersionLabel: '虛擬化服務 版本',
+            incusApiLabel: '虛擬化服務 API',
+            incusCompatibilityTarget: '相容性目標：虛擬化服務 {version}',
             incusCompatibilityReady: '達到最低版本目標；仍需功能驗證',
             incusCompatibilityOlder: '低於目前驗證目標；請在測試環境驗證',
             incusCompatibilityUnknown: '版本資訊不可用',
@@ -4588,13 +4603,13 @@ export default {
             agentLastSeen: '最後心跳',
             agentHeartbeatIp: '心跳 IP',
             agentReportedAt: '上報時間',
-            agentIncus: 'Incus 檢測',
+            agentIncus: '虛擬化服務 檢測',
             agentIncusAvailable: '可用',
             agentIncusUnavailable: '不可用',
             agentCpuTotal: 'CPU 核心',
             agentMemoryTotal: '記憶體總量',
             agentUptime: '宿主機執行時間',
-            agentSocket: 'Incus Socket',
+            agentSocket: '虛擬化服務 Socket',
             agentCpuUsage: 'CPU 使用率',
             agentCpuCores: '核心',
             agentMemoryUsage: '記憶體使用',
@@ -4606,7 +4621,7 @@ export default {
             // 儲存池管理
             storage: {
                 title: '儲存池',
-                subtitle: '管理此宿主機上的 Incus 儲存池',
+                subtitle: '管理此宿主機上的 虛擬化服務 儲存池',
                 create: '新增儲存池',
                 createTitle: '建立儲存池',
                 empty: '暫無儲存池',
@@ -4640,7 +4655,7 @@ export default {
                 dirDesc: '目錄儲存，效能最差，僅用於測試',
                 // 通用
                 useLoop: '使用 Loop 檔案',
-                loopSizeHint: '將在 /var/lib/incus/ 下建立映像檔檔案',
+                loopSizeHint: '將在 /var/lib/platform/ 下建立映像檔檔案',
                 // ZFS
                 zfsSourceHint: '實體碟或分割區路徑，如 /dev/disk/by-id/nvme-xxx',
                 zfsPoolName: 'ZFS 池名稱',
@@ -4654,7 +4669,7 @@ export default {
                 btrfsSourceHint: '實體碟路徑，如 /dev/sdb',
                 // DIR
                 dirPath: '目錄路徑',
-                dirPathHint: '指定一個存在的目錄，如 /mnt/data/incus-storage',
+                dirPathHint: '指定一個存在的目錄，如 /mnt/data/platform-storage',
                 // 儲存用途
                 purpose: '儲存用途',
                 forInstances: '用於實例系統碟',
@@ -4669,7 +4684,7 @@ export default {
                 modeImport: '匯入已有儲存',
                 modeCreateHint: '在宿主機上建立新的儲存池，需要設定驅動類型、儲存源等參數',
                 modeExistingHint: '關聯已在宿主機上建立的儲存池，只需輸入儲存池名稱即可',
-                modeImportHint: '匯入底層已存在但 Incus 還未知曉的儲存池（如手動建立的 ZFS 池、LVM VG）',
+                modeImportHint: '匯入底層已存在但 虛擬化服務 還未知曉的儲存池（如手動建立的 ZFS 池、LVM VG）',
                 linkSuccess: '儲存池關聯成功',
                 importSuccess: '儲存池匯入成功',
                 // 匯入儲存池
@@ -4688,7 +4703,7 @@ export default {
             title: '方案管理',
             loadFailed: '載入方案失敗',
         },
-        instances: '實例管理',
+        instancesLabel: '實例管理',
         settings: '系統設定',
         logs: '系統日誌',
         stats: '統計資料',
@@ -4769,6 +4784,23 @@ export default {
             userPromotedAdmin: '已設為管理員',
             userDemotedAdmin: '已取消管理員權限',
             onlyActiveCanBeAdmin: '只有正常狀態的使用者可以設為管理員',
+            resetPasswordConfirm: '確定要重設使用者「{name}」的密碼嗎？',
+            resetPasswordHint: '可隨機產生或輸入自訂密碼。重設後將撤銷使用者的所有工作階段。',
+            randomPassword: '隨機產生',
+            customPassword: '自訂密碼',
+            customPasswordPlaceholder: '輸入自訂密碼',
+            customPasswordRequired: '請輸入自訂密碼',
+            passwordStrengthHint: '至少 8 位，包含大寫字母、小寫字母和數字。',
+            passwordResetEmailSent: '密碼已重設，郵件已發送',
+            passwordResetEmailSentHint: '新密碼已發送到使用者電子郵件。',
+            passwordResetEmailFailed: '密碼已重設，但郵件發送失敗',
+            passwordResetEmailFailedHint: '使用者密碼已更新，請透過安全管道告知臨時密碼。',
+            temporaryPasswordFor: '使用者「{name}」的臨時密碼：',
+            temporaryPasswordHint: '此密碼僅短暫顯示。請安全複製並告知使用者，關閉後將無法再次查看。',
+            passwordResetSuccess: '密碼重設成功',
+            newPasswordFor: '使用者「{name}」的新密碼：',
+            copyPassword: '複製密碼',
+            copyPasswordHint: '請妥善保管此密碼，關閉彈窗後將無法再次查看',
             userVipLevels: '使用者 VIP 等級',
             vipBenefits: '會員福利大廳設定',
             // 邀請碼
@@ -5885,8 +5917,8 @@ export default {
         loadFailed: '載入方案失敗',
     },
 
-    // 管理後台 - 實例管理
-    adminInstances: {
+    // 舊版管理後台實例文案
+    adminInstancesLegacy: {
         title: '實例管理',
         description: '管理系統中的所有實例',
         searchPlaceholder: '搜尋實例名稱、擁有者...',
@@ -5930,7 +5962,7 @@ export default {
             title: '我的節點',
             description: '管理您的節點，這些節點可以供您和您的好友使用',
             create: '新增節點',
-            createDesc: '新增一個 Incus 節點',
+            createDesc: '新增一個 虛擬化服務 節點',
             ubuntuOnlyHint: '目前僅支援 Ubuntu 22.04+ 和 Debian 11+ 系統。',
             installHintTitle: '填寫節點資訊並提交後，系統會生成包含面板地址和 Token 的安裝命令，複製到節點宿主機執行即可完成安裝。',
             installHintIpv6: '提示：如需 IPv6 網路模式（NAT+IPv6、IPv6 Only），請先在宿主機執行安裝腳本，腳本會自動生成 IPv6 子網資訊供您填入下方表單。',
@@ -6137,7 +6169,7 @@ export default {
             toggleHint: 'SWAP 可依需求啟用或關閉，重裝或重建後會保留目前狀態。',
             runningRequired: '虛擬機需要先啟動後才能啟用 SWAP。',
             vmHint: '虛擬機會透過實例內的 swapfile 持久啟用。',
-            containerHint: '容器會透過 Incus 的記憶體交換限制套用 SWAP。',
+            containerHint: '容器會透過 虛擬化服務 的記憶體交換限制套用 SWAP。',
             enableConfirmTitle: '啟用 SWAP',
             enableConfirmText: '確定要為此實例啟用 {size} 的 SWAP 嗎？',
             disableConfirmTitle: '關閉 SWAP',
@@ -6257,7 +6289,7 @@ export default {
             iops: 'IOPS 限制',
         },
         hints: {
-            ioLimitMode: 'Incus 僅支援其中一種 IO 限制模式，請選擇一種',
+            ioLimitMode: '虛擬化服務 僅支援其中一種 IO 限制模式，請選擇一種',
             cpuPriority: '0 為最低優先級，10 為最高優先級',
             bootPriority: '數值越小越先啟動',
             startupDelay: '實例啟動前等待的秒數 (5-600)',
@@ -6644,7 +6676,7 @@ export default {
         instanceDetails: '實例詳情',
         instanceStatus: '狀態',
         instanceId: '實例 ID',
-        incusId: 'Incus ID',
+        incusId: '虛擬化服務 ID',
         packageName: '方案',
         cores: '核',
         memory: '記憶體',
