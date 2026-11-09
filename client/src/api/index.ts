@@ -1986,6 +1986,7 @@ const api = {
         snapshotLimit: number
         backupLimit: number
         siteLimit: number
+        maxInstances?: number | null
         swapSize: number
         trafficLimit: string
         trafficLimitSpeed: string
@@ -2010,6 +2011,7 @@ const api = {
       snapshotLimit: number
       backupLimit: number
       siteLimit: number
+      maxInstances?: number | null
       swapSize: number
       trafficLimit: string
       trafficLimitSpeed?: string
@@ -2033,6 +2035,7 @@ const api = {
       snapshotLimit?: number
       backupLimit?: number
       siteLimit?: number
+      maxInstances?: number | null
       swapSize?: number
       trafficLimit?: string
       trafficLimitSpeed?: string
@@ -3070,13 +3073,45 @@ const api = {
         isUpgrade: boolean
         newExpiresAt: string
         newConfig: { cpu: number; memory: number; disk: number }
+        credit?: number
+        payable?: number
+        capacity?: {
+          available: boolean
+          remaining: number | null
+          cpuAvailable: number
+          memoryAvailable: number
+          diskAvailable?: number
+        }
+        maxInstances?: number | null
+        usedInstances?: number
+        reservedInstances?: number
         resourceWarnings: string[] | null
         canChange: boolean
         cannotChangeReason?: string
       }
     }> => http.get(`/instances/${instanceId}/change-plan/preview`, { params: { newPlanId } }),
 
-    // 执行升降级
+    // 变更方案支付订单
+    createChangePlanOrder: (instanceId: number, data: { newPlanId: number; providerId: number; paymentMethod?: string }): Promise<{
+      orderNo: string
+      payUrl: string | null
+      amount: number
+      expiredAt: string
+    }> => http.post(`/instances/${instanceId}/change-plan/order`, data),
+    getChangePlanOrder: (instanceId: number, orderNo: string): Promise<{
+      status: string
+      needRestart?: boolean
+      restartMessage?: string | null
+    }> => http.get(`/instances/${instanceId}/change-plan/order/${encodeURIComponent(orderNo)}`),
+    verifyChangePlanOrder: (instanceId: number, orderNo: string): Promise<{
+      status: string
+      needRestart?: boolean
+      restartMessage?: string | null
+    }> => http.post(`/instances/${instanceId}/change-plan/order/${encodeURIComponent(orderNo)}/verify`),
+    cancelChangePlanOrder: (instanceId: number, orderNo: string): Promise<{ status: string; message?: string }> =>
+      http.post(`/instances/${instanceId}/change-plan/order/${encodeURIComponent(orderNo)}/cancel`),
+
+    // 兼容旧接口
     changePlan: (instanceId: number, newPlanId: number): Promise<{
       message: string
       priceDiff: number
@@ -3395,6 +3430,7 @@ const api = {
         snapshotLimit: number
         backupLimit: number
         siteLimit: number
+        maxInstances?: number | null
         swapSize: number
         monthlyTrafficLimit: string | null
         isActive: boolean
@@ -3880,6 +3916,7 @@ const api = {
         snapshotLimit: number
         backupLimit: number
         siteLimit: number
+        maxInstances?: number | null
         swapSize: number
         trafficLimit: string
         isSoldOut: boolean

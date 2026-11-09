@@ -563,6 +563,7 @@ interface PackagePlan {
   snapshotLimit: number
   backupLimit: number
   siteLimit: number
+  maxInstances?: number | null
   swapSize: number
   trafficLimit: string
   trafficLimitSpeed: string
@@ -595,6 +596,7 @@ const planForm = ref({
   snapshotLimit: 3,
   swapSize: 0,
   siteLimit: 1,
+  maxInstances: null as number | null,
   trafficLimit: 1,
   trafficLimitSpeed: 10, // Mbps
   price: 0,
@@ -735,6 +737,7 @@ function openCreatePlanModal(): void {
     snapshotLimit: 3,
     swapSize: 0,
     siteLimit: 1,
+    maxInstances: null,
     trafficLimit: 1,
     trafficLimitSpeed: 10, // Mbps
     price: 0,
@@ -758,6 +761,7 @@ function openEditPlanModal(plan: PackagePlan): void {
     snapshotLimit: plan.snapshotLimit,
     swapSize: plan.swapSize,
     siteLimit: plan.siteLimit,
+    maxInstances: plan.maxInstances ?? null,
     trafficLimit: bytesToGB(plan.trafficLimit),
     trafficLimitSpeed: bytesToMbps(plan.trafficLimitSpeed),
     price: plan.price / 100,
@@ -818,6 +822,7 @@ async function savePlan(): Promise<void> {
       snapshotLimit: planForm.value.snapshotLimit,
       backupLimit: 0,
       siteLimit: planForm.value.siteLimit,
+      maxInstances: planForm.value.maxInstances,
       swapSize: planForm.value.swapSize,
       trafficLimit: gbToBytes(planForm.value.trafficLimit) || '0',
       trafficLimitSpeed: mbpsToBytes(planForm.value.trafficLimitSpeed) || '0',
@@ -1657,6 +1662,10 @@ function getBillingCycleLabel(months: number): string {
                           <span class="text-themed-muted">{{ t('resources.plans.siteLimit') }}:</span>
                           <span class="ml-1 font-mono" :class="themeStore.isDark ? 'text-gray-300' : 'text-gray-700'">{{ plan.siteLimit }}</span>
                         </div>
+                        <div>
+                          <span class="text-themed-muted">{{ t('resources.plans.maxInstances') }}:</span>
+                          <span class="ml-1 font-mono" :class="themeStore.isDark ? 'text-gray-300' : 'text-gray-700'">{{ plan.maxInstances ?? t('common.unlimited') }}</span>
+                        </div>
                       </div>
                       <div v-if="plan.slaGuarantee !== null" class="mt-2 text-xs">
                         <span class="text-themed-muted">SLA保证:</span>
@@ -1774,6 +1783,10 @@ function getBillingCycleLabel(months: number): string {
                   <div>
                     <label class="block text-xs font-medium text-themed-muted mb-1.5">{{ t('resources.plans.siteLimit') }}</label>
                     <input v-model.number="planForm.siteLimit" type="number" min="0" class="input" />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-medium text-themed-muted mb-1.5">{{ t('resources.plans.maxInstances') }}</label>
+                    <input v-model.number="planForm.maxInstances" type="number" min="1" class="input" :placeholder="t('common.unlimited')" />
                   </div>
                   <div>
                     <label class="block text-xs font-medium text-themed-muted mb-1.5">{{ t('resources.plans.trafficLimit') }} (GB) *</label>

@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useThemeStore } from '@/stores/theme'
 import { useToast } from '@/stores/toast'
 import { useConfigStore } from '@/stores/config'
 import api from '@/api'
-import type { ChangePlanPreview } from '@/types/api'
+import type { ChangePlanPreview, PaymentProvider } from '@/types/api'
 import { calculateDailyPrice } from '@/utils/billing'
 import { freeSiteCopy, getFreeSiteBillingCycleLabel } from '@/utils/freeSiteFun'
 
@@ -27,6 +27,7 @@ interface PackagePlanOption {
   snapshotLimit: number
   backupLimit: number
   siteLimit: number
+  maxInstances?: number | null
   swapSize: number
   monthlyTrafficLimit: string | null
   isActive: boolean
@@ -55,11 +56,18 @@ const loading = ref(false)
 const loadingPreview = ref(false)
 const changing = ref(false)
 const plans = ref<PackagePlanOption[]>([])
+const paymentProviders = ref<PaymentProvider[]>([])
+const selectedProviderId = ref<number | null>(null)
+const selectedPaymentMethod = ref<string | undefined>(undefined)
 const selectedPlanId = ref<number | null>(null)
 const preview = ref<ChangePlanPreview | null>(null)
-const userBalance = ref<number>(0)
 const error = ref<string>('')
 const showRules = ref(false)
+const pendingOrderNo = ref<string | null>(null)
+const pendingOrderPlanId = ref<number | null>(null)
+const paymentWindow = ref<Window | null>(null)
+
+const pendingOrderKey = computed(() => `change-plan-order:${props.instanceId}`)
 
 // 获取当前方案的日价（用于筛选升级方案）
 const currentPlanDailyPrice = computed(() => {
@@ -87,11 +95,10 @@ const isHighestPlan = computed(() => {
   return !loading.value && plans.value.length > 0 && availablePlans.value.length === 0
 })
 
-// 是否余额不足（仅升级时检查）
-const insufficientBalance = computed(() => {
-  if (!preview.value || !preview.value.isUpgrade) return false
-  return userBalance.value < preview.value.priceDiff
-})
+const selectedProvider = computed(() => paymentProviders.value.find(provider => provider.id === selectedProviderId.value) || null)
+const selectedProviderMethods = computed(() => selectedProvider.value?.methods || [])
+const payableAmount = computed(() => preview.value?.payable ?? preview.value?.priceDiff ?? 0)
+const isPaid = (status: string) => ['paid', 'completed', 'success', 'succeeded'].includes(status.toLowerCase())
 
 // 不能变更的原因文本
 const cannotChangeReasonText = computed(() => {
@@ -156,19 +163,68 @@ function getBillingCycleText(months: number): string {
 }
 
 
+function clearPendingOrder(): void {
+  pendingOrderNo.value = null
+  pendingOrderPlanId.value = null
+  localStorage.removeItem(pendingOrderKey.value)
+}
+
+async function applyVerifiedOrder(result: { status: string; needRestart?: boolean; restartMessage?: string | null }): Promise<boolean> {
+  if (!isPaid(result.status)) return false
+  clearPendingOrder()
+  emit('success')
+  emit('update:show', false)
+  if (result.needRestart && result.restartMessage) {
+    setTimeout(() => {
+      const message = result.restartMessage === 'KVM_RESTART_REQUIRED'
+        ? t('billing.kvmRestartRequired')
+        : result.restartMessage!
+      toast.warning(message, 8000)
+    }, 500)
+  }
+  return true
+}
+
+async function verifyPendingOrder(): Promise<void> {
+  const raw = localStorage.getItem(pendingOrderKey.value)
+  if (!raw) return
+  try {
+    const pending = JSON.parse(raw) as { orderNo?: string; planId?: number }
+    if (!pending.orderNo || !pending.planId) {
+      clearPendingOrder()
+      return
+    }
+    pendingOrderNo.value = pending.orderNo
+    pendingOrderPlanId.value = pending.planId
+    selectedPlanId.value = pending.planId
+    const result = await api.billing.verifyChangePlanOrder(props.instanceId, pending.orderNo)
+    if (await applyVerifiedOrder(result)) return
+    if (['failed', 'cancelled', 'expired', 'refunded'].includes(result.status.toLowerCase())) {
+      clearPendingOrder()
+      error.value = t('billing.changePlanPaymentNotCompleted')
+    } else {
+      error.value = t('billing.changePlanPaymentPending')
+    }
+  } catch (err: any) {
+    error.value = err.message || t('billing.changePlanVerifyFailed')
+  }
+}
+
 // 加载方案列表
 async function loadPlans() {
   loading.value = true
   error.value = ''
   
   try {
-    const [plansRes, balanceRes] = await Promise.all([
+    const [plansRes, providersRes] = await Promise.all([
       api.billing.getPackagePlans(props.packageId),
-      api.billing.getUserBalance()
+      api.billing.getPaymentProviders()
     ])
-    
     plans.value = plansRes.plans as PackagePlanOption[]
-    userBalance.value = balanceRes.balance.balance
+    paymentProviders.value = providersRes.providers as PaymentProvider[]
+    selectedProviderId.value = paymentProviders.value[0]?.id ?? null
+    selectedPaymentMethod.value = paymentProviders.value[0]?.methods?.[0]
+    await verifyPendingOrder()
   } catch (err: any) {
     error.value = err.message || t('common.loadFailed')
   } finally {
@@ -203,37 +259,52 @@ async function loadPreview() {
   }
 }
 
-// 执行升级
+// 创建支付订单，并只在服务端确认支付后完成变更
 async function handleChangePlan() {
-  if (!selectedPlanId.value || !preview.value) return
-  if (!preview.value.canChange) return
-  if (insufficientBalance.value) return
-  
+  if (!selectedPlanId.value || !preview.value || !preview.value.canChange || !selectedProviderId.value) return
+  const paymentTab = payableAmount.value > 0 ? window.open('about:blank', '_blank') : null
   changing.value = true
   error.value = ''
-  
   try {
-    const result = await api.billing.changePlan(props.instanceId, selectedPlanId.value)
-    
-    // 检查是否需要重启实例以应用配置
-    if (result.needRestart && result.restartMessage) {
-      // 先发出成功事件，然后显示警告 toast
-      emit('success')
-      // 使用 setTimeout 确保成功 toast 先显示，再显示重启警告
-      setTimeout(() => {
-        // KVM_RESTART_REQUIRED 是特殊标记，需要显示本地化文本
-        const message = result.restartMessage === 'KVM_RESTART_REQUIRED'
-          ? t('billing.kvmRestartRequired')
-          : result.restartMessage
-        toast.warning(message!, 8000) // 警告显示 8 秒
-      }, 500)
-    } else {
-      emit('success')
+    const order = await api.billing.createChangePlanOrder(props.instanceId, {
+      newPlanId: selectedPlanId.value,
+      providerId: selectedProviderId.value,
+      paymentMethod: selectedPaymentMethod.value
+    })
+    pendingOrderNo.value = order.orderNo
+    pendingOrderPlanId.value = selectedPlanId.value
+    localStorage.setItem(pendingOrderKey.value, JSON.stringify({ orderNo: order.orderNo, planId: selectedPlanId.value }))
+    if (!order.payUrl) {
+      paymentTab?.close()
+      const result = await api.billing.verifyChangePlanOrder(props.instanceId, order.orderNo)
+      if (!(await applyVerifiedOrder(result))) error.value = t('billing.changePlanPaymentPending')
+      return
     }
-    
-    emit('update:show', false)
+    if (paymentTab) {
+      paymentTab.location.href = order.payUrl
+      paymentWindow.value = paymentTab
+    } else {
+      window.location.assign(order.payUrl)
+    }
+    toast.success(t('billing.changePlanPaymentRedirect'))
   } catch (err: any) {
+    paymentTab?.close()
     error.value = err.message || t('billing.changePlanFailed')
+  } finally {
+    changing.value = false
+  }
+}
+
+async function verifyCurrentOrder(): Promise<void> {
+  if (!pendingOrderNo.value) return
+  changing.value = true
+  try {
+    const result = await api.billing.verifyChangePlanOrder(props.instanceId, pendingOrderNo.value)
+    if (!(await applyVerifiedOrder(result)) && !isPaid(result.status)) {
+      error.value = t('billing.changePlanPaymentPending')
+    }
+  } catch (err: any) {
+    error.value = err.message || t('billing.changePlanVerifyFailed')
   } finally {
     changing.value = false
   }
@@ -244,6 +315,17 @@ watch(() => selectedPlanId.value, () => {
   loadPreview()
 })
 
+watch(() => selectedProviderId.value, () => {
+  selectedPaymentMethod.value = selectedProvider.value?.methods?.[0]
+})
+
+function handleWindowFocus(): void {
+  if (props.show && pendingOrderNo.value) void verifyCurrentOrder()
+}
+
+onMounted(() => window.addEventListener('focus', handleWindowFocus))
+onBeforeUnmount(() => window.removeEventListener('focus', handleWindowFocus))
+
 // 监听显示状态
 watch(() => props.show, (newVal) => {
   if (newVal) {
@@ -251,9 +333,13 @@ watch(() => props.show, (newVal) => {
   } else {
     // 重置状态
     plans.value = []
+    paymentProviders.value = []
+    selectedProviderId.value = null
+    selectedPaymentMethod.value = undefined
     selectedPlanId.value = null
     preview.value = null
-    userBalance.value = 0
+    pendingOrderNo.value = null
+    pendingOrderPlanId.value = null
     error.value = ''
     showRules.value = false
   }
@@ -589,15 +675,15 @@ function handleClose() {
                     </span>
                   </div>
                   <div class="border-t my-2" :class="themeStore.isDark ? 'border-gray-700' : 'border-gray-200'" />
+                  <div v-if="preview.credit !== undefined" class="flex justify-between">
+                    <span :class="themeStore.isDark ? 'text-gray-400' : 'text-gray-600'">{{ t('billing.changePlanCredit') }}</span>
+                    <span :class="themeStore.isDark ? 'text-white' : 'text-gray-900'">¥{{ formatMoney(preview.credit) }}</span>
+                  </div>
                   <div class="flex justify-between font-medium">
                     <span :class="themeStore.isDark ? 'text-gray-300' : 'text-gray-700'">
                       {{ configStore.freeSiteMode ? freeSiteCopy.needPay : t('billing.needPay') }}
                     </span>
-                    <span 
-                      :class="insufficientBalance ? 'text-red-500' : 'text-blue-500'"
-                    >
-                      ¥{{ formatMoney(preview.priceDiff) }}
-                    </span>
+                    <span class="text-blue-500">¥{{ formatMoney(payableAmount) }}</span>
                   </div>
                   <div class="flex justify-between">
                     <span :class="themeStore.isDark ? 'text-gray-400' : 'text-gray-600'">
@@ -609,8 +695,14 @@ function handleClose() {
                   </div>
                 </div>
 
+                <div v-if="preview.capacity || preview.maxInstances !== undefined" class="mt-3 pt-3 border-t text-xs space-y-1" :class="themeStore.isDark ? 'border-gray-700 text-gray-400' : 'border-gray-200 text-gray-600'">
+                  <div v-if="preview.capacity">{{ t('billing.capacityAvailable') }}: {{ preview.capacity.available ? t('common.yes') : t('common.no') }} · {{ t('billing.capacityRemaining') }}: {{ preview.capacity.remaining ?? '-' }}</div>
+                  <div v-if="preview.capacity">CPU {{ preview.capacity.cpuAvailable }} · {{ t('admin.packages.memory') }} {{ formatMemory(preview.capacity.memoryAvailable) }}<span v-if="preview.capacity.diskAvailable !== undefined"> · {{ t('admin.packages.disk') }} {{ formatDisk(preview.capacity.diskAvailable) }}</span></div>
+                  <div v-if="preview.maxInstances !== undefined">{{ t('billing.maxInstances') }}: {{ preview.maxInstances ?? t('common.unlimited') }} · {{ t('billing.usedInstances') }}: {{ preview.usedInstances ?? 0 }} · {{ t('billing.reservedInstances') }}: {{ preview.reservedInstances ?? 0 }}</div>
+                </div>
+
                 <!-- 新配置 -->
-                <div 
+                <div
                   class="mt-3 pt-3 border-t text-xs"
                   :class="themeStore.isDark ? 'border-gray-700' : 'border-gray-200'"
                 >
@@ -623,14 +715,20 @@ function handleClose() {
                 </div>
               </div>
 
-              <!-- 余额不足提示 -->
-              <div 
-                v-if="preview && insufficientBalance"
-                class="p-3 rounded-lg mb-4 text-sm"
-                :class="themeStore.isDark ? 'bg-yellow-900/20 text-yellow-400' : 'bg-yellow-50 text-yellow-600'"
-              >
-                {{ t('billing.insufficientBalance') }}
-                <a href="/wallet" class="underline ml-1">{{ t('billing.goRecharge') }}</a>
+              <div v-if="preview && preview.canChange && payableAmount > 0" class="mb-4 space-y-3">
+                <label class="block text-sm font-medium" :class="themeStore.isDark ? 'text-gray-300' : 'text-gray-700'">{{ t('billing.selectPaymentProvider') }}</label>
+                <div v-if="!paymentProviders.length" class="text-sm text-amber-500">{{ t('billing.noPaymentProviders') }}</div>
+                <select v-else v-model.number="selectedProviderId" class="w-full rounded-lg border px-3 py-2 text-sm" :class="themeStore.isDark ? 'border-gray-700 bg-gray-800 text-white' : 'border-gray-300 bg-white text-gray-900'">
+                  <option v-for="provider in paymentProviders" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
+                </select>
+                <select v-if="selectedProviderMethods.length > 1" v-model="selectedPaymentMethod" class="w-full rounded-lg border px-3 py-2 text-sm" :class="themeStore.isDark ? 'border-gray-700 bg-gray-800 text-white' : 'border-gray-300 bg-white text-gray-900'">
+                  <option v-for="method in selectedProviderMethods" :key="method" :value="method">{{ method }}</option>
+                </select>
+                <div v-else-if="selectedProviderMethods.length === 1" class="text-xs text-themed-muted">{{ t('billing.paymentMethod') }}: {{ selectedProviderMethods[0] }}</div>
+              </div>
+              <div v-if="pendingOrderNo" class="p-3 rounded-lg mb-4 text-sm" :class="themeStore.isDark ? 'bg-blue-900/20 text-blue-300' : 'bg-blue-50 text-blue-700'">
+                {{ t('billing.changePlanPaymentPending') }} <span class="font-mono">{{ pendingOrderNo }}</span>
+                <button class="ml-2 underline" :disabled="changing" @click="verifyCurrentOrder">{{ t('billing.verifyPayment') }}</button>
               </div>
 
               <!-- 错误提示 -->
@@ -658,13 +756,11 @@ function handleClose() {
               {{ t('common.cancel') }}
             </button>
             <button
-              :disabled="loading || loadingPreview || changing || !preview || 
-                !preview.canChange ||
-                insufficientBalance"
+              :disabled="loading || loadingPreview || changing || !preview || !preview.canChange || !selectedProviderId"
               class="px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-blue-600 text-white hover:bg-blue-700"
               @click="handleChangePlan"
             >
-              {{ changing ? t('billing.changePlanInProgress') : t('billing.upgrade') }}
+              {{ changing ? t('billing.changePlanInProgress') : payableAmount > 0 ? t('billing.payAndUpgrade') : t('billing.upgrade') }}
             </button>
           </div>
         </div>
