@@ -106,6 +106,19 @@ set_env_if_missing() {
     log "已自动补充 ${label}: ${key}"
 }
 
+validate_configured_image() {
+    local image
+    image="$(get_env_value "INCUDAL_IMAGE")"
+    if [[ -z "$image" ]]; then
+        image="${DOCKER_IMAGE}:stable"
+    fi
+    if [[ "$image" != */* ]]; then
+        error "INCUDAL_IMAGE 必须是完整镜像地址，当前值 '${image}' 是本地标签"
+        error "请在 ${ENV_FILE} 中设置 INCUDAL_IMAGE=${DOCKER_IMAGE}:stable"
+        return 1
+    fi
+}
+
 ensure_env_keys() {
     if [[ ! -f "$ENV_FILE" ]]; then
         return 0
@@ -116,6 +129,8 @@ ensure_env_keys() {
     set_env_if_missing "COOKIE_SECRET" "$(gen_secret 48)" "Cookie 密钥"
     set_env_if_missing "ENCRYPTION_KEY" "$(openssl rand -base64 32)" "敏感数据加密密钥"
     set_env_if_missing "ADMIN_PASSWORD" "$(gen_password 16)" "管理员初始密码"
+    set_env_if_missing "INCUDAL_IMAGE" "${DOCKER_IMAGE}:stable" "Incudal Docker 镜像"
+    validate_configured_image
 
     chmod 600 "$ENV_FILE"
 }
@@ -361,6 +376,7 @@ COOKIE_SECRET=${cookie_secret}
 ENCRYPTION_KEY=${encryption_key}
 
 # ============ 应用配置 ============
+INCUDAL_IMAGE=${DOCKER_IMAGE}:stable
 APP_PORT=${DEFAULT_PORT}
 ADMIN_PASSWORD=${admin_password}
 LOG_LEVEL=info
@@ -455,8 +471,9 @@ start_docker() {
 
     cd "$INSTALL_DIR"
 
-    info "拉取最新镜像..."
-    docker compose pull 2>&1 | tail -5
+    validate_configured_image
+    info "拉取应用和 Redis 镜像..."
+    docker compose pull app redis 2>&1 | tail -10
 
     info "启动容器..."
     docker compose up -d 2>&1
@@ -629,8 +646,9 @@ do_upgrade() {
 
     cd "$INSTALL_DIR"
 
-    info "拉取最新镜像..."
-    docker compose pull 2>&1 | tail -5
+    validate_configured_image
+    info "拉取应用和 Redis 镜像..."
+    docker compose pull app redis 2>&1 | tail -10
 
     info "重建容器（使用新镜像）..."
     docker compose up -d --force-recreate app 2>&1

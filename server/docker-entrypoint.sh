@@ -27,12 +27,23 @@ fi
 
 echo "[startup] Waiting for PostgreSQL and applying database migrations..."
 
+migration_log="$(mktemp)"
+trap 'rm -f "$migration_log"' EXIT
+
 attempt=1
 while :; do
   echo "[startup] Prisma migration attempt ${attempt}/${MIGRATION_ATTEMPTS}"
-  if npx prisma migrate deploy; then
+  if npx prisma migrate deploy >"$migration_log" 2>&1; then
+    cat "$migration_log"
     echo "[startup] Database migrations completed"
     break
+  fi
+
+  cat "$migration_log"
+  if grep -q 'P3009' "$migration_log"; then
+    echo "[startup] Prisma found a previously failed migration (P3009); retrying cannot repair it" >&2
+    echo "[startup] Inspect _prisma_migrations, then run prisma migrate resolve before restarting the application" >&2
+    exit 1
   fi
 
   if [ "$attempt" -ge "$MIGRATION_ATTEMPTS" ]; then

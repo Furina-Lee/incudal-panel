@@ -106,8 +106,79 @@ curl http://127.0.0.1:3000/api/health
 升级应用：
 
 ```bash
-docker compose up -d --build app
+# 使用 GHCR 预构建镜像时，升级脚本会执行 pull；源码部署才使用 --build
+docker compose pull app redis
+docker compose up -d --force-recreate app
 ```
+
+### Docker 常见错误排查
+
+#### `pull access denied for incudal-panel`
+
+生产安装使用 GHCR 完整镜像名。安装器在 `/opt/incudal/.env` 中设置 `INCUDAL_IMAGE=ghcr.io/furina-lee/incudal-panel:stable`；`.env` 会覆盖 Compose 文件中的 `${INCUDAL_IMAGE:-...}` 默认值。检查 Compose 最终解析的镜像：
+
+```bash
+cd /opt/incudal
+grep -n '^INCUDAL_IMAGE=' .env
+docker compose config --images
+```
+
+如果看到裸标签（例如 `incudal-panel:connection-limit`），改为已经发布到 GHCR 的完整镜像地址。稳定版示例：
+
+```bash
+sed -i 's#^INCUDAL_IMAGE=.*#INCUDAL_IMAGE=ghcr.io/furina-lee/incudal-panel:stable#' .env
+docker compose pull app redis
+docker compose up -d app
+```
+
+私有 GHCR 仓库需要先运行 `docker login ghcr.io`。不要对裸的本地标签运行 `docker compose pull`。`docker compose config --images` 是判断 Compose 实际使用镜像的准确信息；若仍不匹配，检查 `COMPOSE_FILE` 环境变量和命令中的 `-f` 参数。
+
+#### 启动日志持续重试迁移
+
+后端容器会在启动时自动运行 `prisma migrate deploy`。数据库暂时不可达时会有限重试；检查 `DATABASE_URL` 的主机、端口、数据库名、账号权限、网络和 TLS 配置：
+
+```bash
+docker compose logs --tail=150 app
+docker compose ps
+```
+
+迁移成功时会出现 `Database migrations completed` 和 `Starting application...`。迁移失败时应用不会启动。`P3009` 表示数据库存在一条先前失败的迁移，重复重试不能修复它；先停止应用：
+
+```bash
+docker compose stop app
+```
+
+可使用应用镜像内的 Node.js 和 `pg` 包查询失败详情与目标列，不需要安装数据库管理工具。下面命令会打印迁移记录和 `root_password` 列状态，不会输出数据库连接串：
+
+```bash
+docker compose run --pull never --rm --no-deps \
+  --workdir /app/server \
+  --entrypoint node app \
+  -e 'const {Client}=require("pg");(async()=>{const c=new Client({connectionString:process.env.DATABASE_URL});await c.connect();const m=await c.query(`SELECT migration_name,finished_at,rolled_back_at,logs FROM "_prisma_migrations" WHERE migration_name=$1 ORDER BY started_at DESC`,["20261110150000_add_instance_task_root_password"]);console.log(JSON.stringify(m.rows,null,2));const r=await c.query(`SELECT data_type FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 AND column_name=$3`,["public","instance_tasks","root_password"]);console.log("column:",JSON.stringify(r.rows));await c.end()})().catch(e=>{console.error(e);process.exit(1)})'
+```
+
+对于 `20261110150000_add_instance_task_root_password`，迁移只添加 `instance_tasks.root_password TEXT`。如果确认该列存在且类型为 `text`，可将已完成的数据库变更登记为已应用，然后重新启动：
+
+```bash
+docker compose run --pull never --rm --no-deps \
+  --workdir /app/server --entrypoint npx app \
+  prisma migrate resolve --applied 20261110150000_add_instance_task_root_password
+docker compose up -d app
+docker compose logs --tail=100 app
+```
+
+如果列不存在，且 `logs` 确认迁移没有部分应用，则标记失败记录已回滚并重新部署迁移：
+
+```bash
+docker compose run --pull never --rm --no-deps \
+  --workdir /app/server --entrypoint npx app \
+  prisma migrate resolve --rolled-back 20261110150000_add_instance_task_root_password
+docker compose run --pull never --rm --no-deps \
+  --workdir /app/server --entrypoint npx app prisma migrate deploy
+docker compose up -d app
+```
+
+`migrate resolve` 成功后再启动，日志应显示 `No pending migrations to apply` 或 `Database migrations completed`。如果失败原因是权限不足或其他 SQL 错误，先修复根因；不要运行 `prisma migrate reset`、手动删除 `_prisma_migrations` 记录，或在未确认 schema 已完整变更时使用 `--applied`。生产数据库在迁移前应先做备份。
 
 普通停止/卸载不会删除数据库卷：
 
