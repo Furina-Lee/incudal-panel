@@ -28,7 +28,7 @@ interface Props {
 
 interface Emits {
   (e: 'update:visible', value: boolean): void
-  (e: 'submit', data: { image: string; sshKeyId: number; customInitCommandIds?: number[]; initScript?: string }): void
+  (e: 'submit', data: { image: string; sshKeyId?: number; rootPassword?: string; customInitCommandIds?: number[]; initScript?: string }): void
 }
 
 const props = defineProps<Props>()
@@ -37,6 +37,8 @@ const themeStore = useThemeStore()
 
 const selectedImage = ref<string>('')
 const selectedSshKeyId = ref<number | null>(null)
+const authMethod = ref<'ssh_key' | 'password'>('ssh_key')
+const rootPassword = ref('')
 const customInitCommandIds = ref<number[]>([])
 const initScript = ref('')
 const initScriptBytes = computed(() => new TextEncoder().encode(initScript.value).length)
@@ -91,6 +93,8 @@ watch(
       // 弹窗关闭时重置
       selectedImage.value = ''
       selectedSshKeyId.value = null
+      authMethod.value = 'ssh_key'
+      rootPassword.value = ''
       customInitCommandIds.value = []
       initScript.value = ''
       isImageDropdownOpen.value = false
@@ -112,10 +116,18 @@ function toggleImageDropdown() {
 }
 
 function handleSubmit(): void {
-  if (selectedImage.value && selectedSshKeyId.value) {
-    emit('submit', { 
-      image: selectedImage.value, 
+  if (!selectedImage.value) return
+  if (authMethod.value === 'ssh_key' && selectedSshKeyId.value) {
+    emit('submit', {
+      image: selectedImage.value,
       sshKeyId: selectedSshKeyId.value,
+      customInitCommandIds: customInitCommandIds.value.length > 0 ? customInitCommandIds.value : undefined,
+      initScript: initScript.value || undefined
+    })
+  } else if (authMethod.value === 'password' && rootPassword.value.length >= 8) {
+    emit('submit', {
+      image: selectedImage.value,
+      rootPassword: rootPassword.value,
       customInitCommandIds: customInitCommandIds.value.length > 0 ? customInitCommandIds.value : undefined,
       initScript: initScript.value || undefined
     })
@@ -303,21 +315,39 @@ function close(): void {
             </div>
           </div>
 
-          <!-- SSH key selection -->
-          <div>
-            <label class="block text-xs text-gray-500 mb-1.5">{{ t('rebuildModal.selectSshKey') }}</label>
-            <select v-model="selectedSshKeyId" class="input" :disabled="sshKeys.length === 0">
-              <option v-if="sshKeys.length === 0" :value="null">{{ t('rebuildModal.noSshKey') }}</option>
-              <option v-for="key in sshKeys" :key="key.id" :value="key.id">
-                {{ key.name }}
-              </option>
-            </select>
-            <p 
-              v-if="sshKeys.length === 0"
-              class="text-xs mt-1.5 text-red-500"
-            >
-              {{ t('rebuildModal.addSshKeyHint') }}
-            </p>
+          <!-- Login credential -->
+          <div class="space-y-3">
+            <label class="block text-xs text-gray-500">{{ t('rebuildModal.loginMethod') }}</label>
+            <div class="flex flex-wrap gap-4 text-sm">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input v-model="authMethod" type="radio" value="ssh_key" class="w-4 h-4 accent-blue-500" />
+                <span>{{ t('rebuildModal.useSshKey') }}</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input v-model="authMethod" type="radio" value="password" class="w-4 h-4 accent-blue-500" />
+                <span>{{ t('rebuildModal.useCustomPassword') }}</span>
+              </label>
+            </div>
+            <div v-if="authMethod === 'ssh_key'">
+              <select v-model.number="selectedSshKeyId" class="input w-full" :required="authMethod === 'ssh_key'">
+                <option :value="null" disabled>{{ t('rebuildModal.selectSshKey') }}</option>
+                <option v-for="key in sshKeys" :key="key.id" :value="key.id">{{ key.name }}</option>
+              </select>
+              <p v-if="sshKeys.length === 0" class="text-xs mt-1.5 text-red-500">{{ t('rebuildModal.addSshKeyHint') }}</p>
+            </div>
+            <div v-else>
+              <input
+                v-model="rootPassword"
+                type="password"
+                class="input w-full"
+                autocomplete="new-password"
+                minlength="8"
+                maxlength="128"
+                :placeholder="t('rebuildModal.passwordPlaceholder')"
+                :required="authMethod === 'password'"
+              />
+              <p class="text-xs mt-1.5" :class="themeStore.isDark ? 'text-gray-500' : 'text-gray-400'">{{ t('rebuildModal.customPasswordHint') }}</p>
+            </div>
           </div>
 
           <!-- 初始化命令选择 -->
@@ -362,7 +392,7 @@ function close(): void {
           <div class="flex justify-end gap-3 pt-2">
             <button type="button" class="btn-secondary" @click="close">{{ t('rebuildModal.cancel') }}</button>
             <button 
-              :disabled="loading || !selectedImage || !selectedSshKeyId || sshKeys.length === 0 || initScriptTooLarge"
+              :disabled="loading || !selectedImage || initScriptTooLarge || (authMethod === 'ssh_key' ? !selectedSshKeyId || sshKeys.length === 0 : rootPassword.length < 8)"
               class="btn-danger" 
               @click="handleSubmit"
             >

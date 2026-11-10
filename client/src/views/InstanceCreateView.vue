@@ -953,7 +953,7 @@ async function handleSubmit(): Promise<void> {
       throw new Error(nameValidation.message)
     }
 
-    await api.instances.create({
+    const createdInstance = await api.instances.create({
       name: form.value.name,
       packageId: form.value.packageId,
       planId: form.value.planId || undefined,
@@ -969,8 +969,10 @@ async function handleSubmit(): Promise<void> {
       promoCode: (isPaidPackage.value && promoCodeValid.value && form.value.promoCode.trim()) ? form.value.promoCode.trim() : undefined
     } as CreateInstanceRequest & { promoCode?: string })
     
-    toast.success(t('instance.createPage.createSuccess'))
-    router.push('/instances')
+    toast.success(createdInstance.initializationTaskId
+      ? t('instance.createPage.createAndInitializeQueued')
+      : t('instance.createPage.createSuccess'))
+    router.push(createdInstance.id ? `/instances/${createdInstance.id}` : '/instances')
   } catch (err: any) {
     error.value = translateError(err)
   } finally {

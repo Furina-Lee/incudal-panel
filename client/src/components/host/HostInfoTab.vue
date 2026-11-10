@@ -387,17 +387,17 @@ function copyAgentInstallCommand() {
   toast.success(t('admin.hosts.agentInstallCommandCopied'))
 }
 
-// 资源校对
+// Resource maintenance actions are intentionally separate: usage recalculation never changes quotas.
 const recalculating = ref(false)
+const aligningQuotas = ref(false)
 
 async function recalculateResources() {
-  if (recalculating.value) return
+  if (recalculating.value || aligningQuotas.value) return
   recalculating.value = true
   try {
     const result = await api.hosts.recalculateResources(props.host.id)
     if (result.hasChanges) {
       toast.success(t('admin.hosts.recalculateSuccess'))
-      // 刷新父组件数�?
       emit('refresh')
     } else {
       toast.info(t('admin.hosts.recalculateNoChanges'))
@@ -406,6 +406,26 @@ async function recalculateResources() {
     toast.error(t('admin.hosts.recalculateFailed') + ': ' + (err?.message || String(err)))
   } finally {
     recalculating.value = false
+  }
+}
+
+async function alignQuotasToUsage() {
+  if (recalculating.value || aligningQuotas.value) return
+  if (!window.confirm(t('admin.hosts.alignQuotasConfirm'))) return
+
+  aligningQuotas.value = true
+  try {
+    const result = await api.hosts.alignHostQuotasToUsage(props.host.id)
+    if (result.hasChanges) {
+      toast.success(t('admin.hosts.alignQuotasSuccess'))
+      emit('refresh')
+    } else {
+      toast.info(t('admin.hosts.alignQuotasNoChanges'))
+    }
+  } catch (err: any) {
+    toast.error(t('admin.hosts.alignQuotasFailed') + ': ' + (err?.message || String(err)))
+  } finally {
+    aligningQuotas.value = false
   }
 }
 
@@ -544,23 +564,42 @@ const xAxisLabels = computed(() => {
         <h2 class="text-sm font-medium" :class="themeStore.isDark ? 'text-gray-300' : 'text-gray-700'">
           {{ t('admin.hosts.resources') }}
         </h2>
-        <button
-          class="btn-ghost btn-xs flex items-center gap-1"
-          :disabled="recalculating"
-          :title="t('admin.hosts.recalculateResourcesTip')"
-          @click="recalculateResources"
-        >
-          <svg 
-            class="w-3.5 h-3.5" 
-            :class="{ 'animate-spin': recalculating }"
-            fill="none" 
-            stroke="currentColor" 
-            viewBox="0 0 24 24"
+        <div class="flex items-center gap-2">
+          <button
+            class="btn-ghost btn-xs flex items-center gap-1"
+            :disabled="recalculating || aligningQuotas"
+            :title="t('admin.hosts.recalculateResourcesTip')"
+            @click="recalculateResources"
           >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          <span class="hidden sm:inline">{{ t('admin.hosts.recalculateResources') }}</span>
-        </button>
+            <svg
+              class="w-3.5 h-3.5"
+              :class="{ 'animate-spin': recalculating }"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span class="hidden sm:inline">{{ t('admin.hosts.recalculateResources') }}</span>
+          </button>
+          <button
+            class="btn-ghost btn-xs flex items-center gap-1 text-amber-500 hover:text-amber-400"
+            :disabled="recalculating || aligningQuotas"
+            :title="t('admin.hosts.alignQuotasTip')"
+            @click="alignQuotasToUsage"
+          >
+            <svg
+              class="w-3.5 h-3.5"
+              :class="{ 'animate-spin': aligningQuotas }"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v18m9-9H3m15.5-6.5L5.5 18.5m13 0L5.5 5.5" />
+            </svg>
+            <span class="hidden sm:inline">{{ t('admin.hosts.alignQuotas') }}</span>
+          </button>
+        </div>
       </div>
       <div class="space-y-4">
         <!-- CPU -->

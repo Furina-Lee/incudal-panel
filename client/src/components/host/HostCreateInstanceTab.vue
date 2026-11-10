@@ -73,6 +73,10 @@ const isAdmin = computed(() => (loadedUserRole.value ?? authStore.user?.role) ==
 
 const packages = ref<Package[]>([])
 const sshKeys = ref<SshKey[]>([])
+const targetSshKeys = ref<SshKey[]>([])
+const adminAuthMethod = ref<'ssh_key' | 'password'>('ssh_key')
+const adminRootPassword = ref('')
+const selectedTargetSshKeyId = ref<number | null>(null)
 const userQuota = ref<UserQuota | null>(null)
 const availableImages = ref<ImageOption[]>([])
 const plans = ref<GiftPlan[]>([])
@@ -163,7 +167,10 @@ const canSubmitGift = computed(() => {
     !!form.value.image &&
     hasTarget &&
     hasPlan &&
-    isGiftDaysValid.value
+    isGiftDaysValid.value &&
+    (!isAdmin.value || (adminAuthMethod.value === 'ssh_key'
+      ? selectedTargetSshKeyId.value !== null
+      : adminRootPassword.value.length >= 8))
   )
 })
 
@@ -296,11 +303,24 @@ async function loadData(): Promise<void> {
   }
 }
 
+watch(targetUsername, (value) => {
+  if (targetUser.value && value.trim() !== targetUser.value.username) {
+    targetLookupState.value = 'idle'
+    targetUser.value = null
+    targetSshKeys.value = []
+    selectedTargetSshKeyId.value = null
+    adminRootPassword.value = ''
+  }
+})
+
 async function checkTargetUser(): Promise<void> {
   const username = targetUsername.value.trim()
   if (!username) {
     targetLookupState.value = 'idle'
     targetUser.value = null
+    targetSshKeys.value = []
+    selectedTargetSshKeyId.value = null
+    adminRootPassword.value = ''
     return
   }
 
@@ -319,13 +339,20 @@ async function checkTargetUser(): Promise<void> {
       return
     }
 
-    if (!res.user.hasSshKey) {
+    if (!isAdmin.value && !res.user.hasSshKey) {
       targetLookupState.value = 'no_ssh'
       targetUser.value = null
       return
     }
 
     targetLookupState.value = 'found'
+    targetSshKeys.value = (res.user.sshKeys || []).map(key => ({
+      id: key.id,
+      name: key.name,
+      fingerprint: key.fingerprint,
+      createdAt: key.createdAt
+    }))
+    selectedTargetSshKeyId.value = targetSshKeys.value[0]?.id ?? null
     targetUser.value = {
       id: res.user.id,
       username: res.user.username
@@ -378,6 +405,10 @@ watch([createMode, giftInstanceType, selectedPlanId], () => {
     targetUsername.value = ''
     targetLookupState.value = 'idle'
     targetUser.value = null
+    targetSshKeys.value = []
+    selectedTargetSshKeyId.value = null
+    adminRootPassword.value = ''
+    adminAuthMethod.value = 'ssh_key'
     giftInstanceType.value = 'free'
     giftDays.value = 30
   }
@@ -447,11 +478,21 @@ async function handleGiftSubmit(): Promise<void> {
     disk?: number
     planId?: number
     giftDays?: number
+    sshKeyId?: number
+    rootPassword?: string
   } = {
     username: targetUser.value.username,
     name: form.value.name.trim(),
     packageId: form.value.packageId,
     image: form.value.image
+  }
+
+  if (isAdmin.value) {
+    if (adminAuthMethod.value === 'ssh_key' && selectedTargetSshKeyId.value !== null) {
+      payload.sshKeyId = selectedTargetSshKeyId.value
+    } else if (adminAuthMethod.value === 'password') {
+      payload.rootPassword = adminRootPassword.value
+    }
   }
 
   if (isGiftPaid.value && selectedPlanId.value) {
@@ -463,13 +504,19 @@ async function handleGiftSubmit(): Promise<void> {
     payload.disk = form.value.disk
   }
 
-  await api.hosts.createInstanceForUser(props.hostId, payload)
+  const result = await api.hosts.createInstanceForUser(props.hostId, payload)
 
   toast.success(t('host.createInstance.giftSuccess', { username: targetUser.value.username }))
+  if (isAdmin.value && adminAuthMethod.value === 'password' && result.instance.rootPassword) {
+    window.alert(`${t('admin.instanceCreate.credentialsReady')}\nSSH Port: ${result.instance.sshPort || '-'}\nPassword: ${result.instance.rootPassword}\n\n${t('admin.instanceCreate.instancePasswordHint')}`)
+  }
 
   targetUsername.value = ''
   targetLookupState.value = 'idle'
   targetUser.value = null
+  targetSshKeys.value = []
+  selectedTargetSshKeyId.value = null
+  adminRootPassword.value = ''
   giftInstanceType.value = 'free'
   giftDays.value = 30
   form.value.name = ''
@@ -554,6 +601,42 @@ async function handleSubmit(): Promise<void> {
           :selected-package-id="form.packageId"
           @select="handlePackageSelect"
         />
+
+        <div v-if="isAdmin && isGiftMode && targetUser" class="space-y-3">
+          <h3 class="text-sm font-medium text-themed">{{ t('admin.instanceCreate.loginMethod') }}</h3>
+          <div class="flex flex-wrap gap-4">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input v-model="adminAuthMethod" type="radio" value="ssh_key" class="w-4 h-4 accent-blue-500" />
+              <span class="text-themed">{{ t('admin.instanceCreate.useSshKey') }}</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input v-model="adminAuthMethod" type="radio" value="password" class="w-4 h-4 accent-blue-500" />
+              <span class="text-themed">{{ t('admin.instanceCreate.useCustomPassword') }}</span>
+            </label>
+          </div>
+          <div v-if="adminAuthMethod === 'ssh_key'" class="space-y-2">
+            <select v-model.number="selectedTargetSshKeyId" class="input w-full" :required="adminAuthMethod === 'ssh_key'">
+              <option :value="null" disabled>{{ t('admin.instanceCreate.selectSshKey') }}</option>
+              <option v-for="key in targetSshKeys" :key="key.id" :value="key.id">
+                {{ key.name }} · {{ key.fingerprint }}
+              </option>
+            </select>
+            <p v-if="targetSshKeys.length === 0" class="text-xs text-themed-muted">{{ t('admin.instanceCreate.noSshKeyUsePassword') }}</p>
+          </div>
+          <div v-else class="space-y-2">
+            <input
+              v-model="adminRootPassword"
+              type="password"
+              class="input w-full"
+              autocomplete="new-password"
+              :placeholder="t('admin.instanceCreate.customPasswordPlaceholder')"
+              minlength="8"
+              maxlength="128"
+              required
+            />
+            <p class="text-xs text-themed-muted">{{ t('admin.instanceCreate.instancePasswordHint') }}</p>
+          </div>
+        </div>
 
         <div v-if="isGiftMode" class="space-y-4">
           <div class="space-y-2">

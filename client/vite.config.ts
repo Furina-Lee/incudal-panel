@@ -1,12 +1,20 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import obfuscator from 'rollup-plugin-obfuscator'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath, URL } from 'node:url'
+
+const { version: appVersion } = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+) as { version: string }
 
 export default defineConfig(({ mode }) => {
   const isProd = mode === 'production'
 
   return {
+    define: {
+      __APP_VERSION__: JSON.stringify(appVersion)
+    },
     // 使用绝对路径根路径，在生产环境中静态资源需要从根路径加载
     base: '/',
     
@@ -79,14 +87,16 @@ export default defineConfig(({ mode }) => {
           chunkFileNames: 'assets/[hash].js',
           entryFileNames: 'assets/[hash].js',
           assetFileNames: 'assets/[hash].[ext]',
-          // 手动分割代码块，优化缓存和加载
-          manualChunks: {
-            // 核心 Vue 库（基础库，缓存利用率高）
-            'vue-core': ['vue', 'vue-router', 'pinia'],
-            // 国际化库
-            'vue-i18n': ['vue-i18n'],
-            // 网络请求库
-            'axios': ['axios'],
+          // 手动分割代码块，避免国际化资源和终端依赖进入首屏代码块
+          manualChunks(id) {
+            if (id.includes('/src/locales/en.ts')) return 'locale-en'
+            if (id.includes('/src/locales/zh-CN.ts')) return 'locale-zh-cn'
+            if (id.includes('/src/locales/zh-TW.ts')) return 'locale-zh-tw'
+            if (id.includes('/node_modules/@xterm/xterm/')) return 'terminal-xterm'
+            if (id.includes('/node_modules/@xterm/')) return 'terminal-addons'
+            if (id.includes('/node_modules/vue/') || id.includes('/node_modules/vue-router/') || id.includes('/node_modules/pinia/')) return 'vue-core'
+            if (id.includes('/node_modules/vue-i18n/')) return 'vue-i18n'
+            if (id.includes('/node_modules/axios/')) return 'axios'
           },
         },
         onwarn(warning, warn) {

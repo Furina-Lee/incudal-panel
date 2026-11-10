@@ -288,6 +288,7 @@ model InstanceTask {
   sshKeyId             Int?    @map("ssh_key_id") // 重装使用的 SSH 密钥 ID
   customInitCommandIds String? @map("custom_init_command_ids") // 重装使用的自定义初始化命令ID列表 (JSON数组)
   initScript           String? @map("init_script") // 一次性初始化脚本（加密存储）
+  rootPassword         String? @map("root_password") // 重装密码（加密存储）
   targetName           String? @map("target_name") // 克隆的目标名称
   targetHostId         Int?    @map("target_host_id") // 克隆的目标宿主机
   snapshotName         String? @map("snapshot_name") // 克隆时的快照名称

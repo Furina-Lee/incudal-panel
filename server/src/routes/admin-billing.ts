@@ -26,7 +26,7 @@ import { resolveRechargeProviderConfigSnapshot } from '../lib/recharge-provider-
 import { getTradeNoForIndex } from '../lib/recharge-reliability.js'
 import { createInboxMessage } from '../db/inbox.js'
 import { getTodayRange, getThisMonthStart, getLastMonthRange } from '../lib/timezone.js'
-import { validateName, encryptSensitiveData } from '../lib/security.js'
+import { validateName, validatePassword, encryptSensitiveData } from '../lib/security.js'
 import { generateIncusConfig, generateRandomPassword } from '../lib/incus-config-generator.js'
 import { apiError, ErrorCode } from '../lib/errors.js'
 import {
@@ -2669,7 +2669,29 @@ export default async function adminBillingRoutes(app: FastifyInstance): Promise<
   // POST /api/admin/instances/create - 管理员为用户创建实例（支持免费赠送或付费实例）
   app.post('/api/admin/instances/create', {
     onRequest: [app.authenticate, app.requireAdmin],
-    config: { rateLimit: { max: 10, timeWindow: '1 minute' } }
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+    schema: {
+      body: {
+        type: 'object',
+        required: ['username', 'name', 'packageId', 'image', 'hostId'],
+        additionalProperties: false,
+        properties: {
+          username: { type: 'string', minLength: 2, maxLength: 32 },
+          name: { type: 'string', minLength: 2, maxLength: 64 },
+          packageId: { type: 'integer', minimum: 1 },
+          planId: { type: 'integer', minimum: 1 },
+          chargeFirstMonth: { type: 'boolean' },
+          image: { type: 'string', minLength: 1 },
+          cpu: { type: 'integer', minimum: 15, maximum: 10000 },
+          memory: { type: 'integer', minimum: 128, maximum: 524288 },
+          disk: { type: 'integer', minimum: 512, maximum: 104857600 },
+          hostId: { type: 'integer', minimum: 1 },
+          customInitCommandIds: { type: 'array', items: { type: 'integer', minimum: 1 }, maxItems: 50 },
+          sshKeyId: { type: 'integer', minimum: 1 },
+          rootPassword: { type: 'string', minLength: 8, maxLength: 128 }
+        }
+      }
+    }
   }, async (request, reply) => {
     const admin = request.user!
     const body = request.body as {
@@ -2684,9 +2706,11 @@ export default async function adminBillingRoutes(app: FastifyInstance): Promise<
       disk?: number         // 硬盘（免费实例自定义配置）
       hostId: number        // 指定宿主机
       customInitCommandIds?: number[]  // 初始化命令
+      sshKeyId?: number
+      rootPassword?: string
     }
 
-    const { username, name, packageId, planId, chargeFirstMonth = true, image, cpu, memory, disk, hostId, customInitCommandIds } = body
+    const { username, name, packageId, planId, chargeFirstMonth = true, image, cpu, memory, disk, hostId, customInitCommandIds, sshKeyId, rootPassword: requestedRootPassword } = body
 
     try {
       // 1. 验证必填参数
@@ -2714,12 +2738,31 @@ export default async function adminBillingRoutes(app: FastifyInstance): Promise<
         return reply.status(400).send({ error: `用户 "${username}" 状态异常，无法创建实例` })
       }
 
-      // 4. 获取目标用户的 SSH 密钥
-      const targetUserSshKeys = await db.getSSHKeysByUserId(targetUser.id)
-      if (targetUserSshKeys.length === 0) {
-        return reply.status(400).send({ error: `用户 "${username}" 没有 SSH 密钥，请先让用户添加 SSH 密钥` })
+      // 4. Resolve the selected public credential. The key must belong to the target user.
+      if ((sshKeyId === undefined) === (requestedRootPassword === undefined)) {
+        return reply.status(400).send({ error: '请选择一把 SSH 密钥或输入自定义实例密码' })
       }
-      const sshKey = targetUserSshKeys[0].public_key
+
+      const selectedSshKey = sshKeyId !== undefined
+        ? await prisma.sshKey.findFirst({
+            where: { id: sshKeyId, userId: targetUser.id },
+            select: { publicKey: true }
+          })
+        : null
+
+      if (sshKeyId !== undefined && !selectedSshKey) {
+        return reply.status(400).send({ error: '所选 SSH 密钥不存在或不属于目标用户' })
+      }
+
+      if (requestedRootPassword !== undefined) {
+        const passwordCheck = validatePassword(requestedRootPassword)
+        if (!passwordCheck.valid) {
+          return reply.status(400).send({ error: passwordCheck.message || '自定义密码不符合强度要求' })
+        }
+      }
+
+      const sshKey = selectedSshKey?.publicKey
+      const effectiveRootPassword = requestedRootPassword || generateRandomPassword(16)
 
       // 5. 验证套餐
       const pkg = await db.getPackageById(packageId)
@@ -2848,15 +2891,13 @@ export default async function adminBillingRoutes(app: FastifyInstance): Promise<
       if (effectiveInstanceType === 'vm' && ['nat_ipv6_nat', 'ipv6_nat'].includes(networkMode)) {
         return reply.code(400).send(apiError(ErrorCode.INVALID_PARAMS, 'KVM packages do not support IPv4 NAT & IPv6 NAT or IPv6 NAT network modes'))
       }
-      const autoPassword = generateRandomPassword(16)
       const { configPayload, metaData } = generateIncusConfig({
         instanceName: name,
         imageAlias: image,
-        rootPassword: autoPassword,
+        rootPassword: effectiveRootPassword,
         sshKey: sshKey,
         networkMode,
-        type: effectiveInstanceType === 'vm' ? 'virtual-machine' : 'container',
-        extraShellCommands
+        type: effectiveInstanceType === 'vm' ? 'virtual-machine' : 'container'
       })
 
       // 13. 生成 IncusId（使用目标用户 ID）
@@ -3063,6 +3104,20 @@ export default async function adminBillingRoutes(app: FastifyInstance): Promise<
         throw new Error('Host should not be null after successful transaction')
       }
 
+      if (extraShellCommands) {
+        await prisma.instanceTask.create({
+          data: {
+            instanceId,
+            hostId: host.id,
+            userId: targetUser.id,
+            taskType: 'initialize',
+            status: 'PENDING',
+            imageAlias: image,
+            initScript: encryptSensitiveData(extraShellCommands)
+          }
+        })
+      }
+
       // 16. 分配 IP
       let staticIPv4: string | null = null
       let staticIPv6: string | null = null
@@ -3123,7 +3178,6 @@ export default async function adminBillingRoutes(app: FastifyInstance): Promise<
             ipv6Address: staticIPv6 ? `${staticIPv6}` : undefined,
             ipv6Gateway: staticIPv6 ? (hostWithIpv6.ipv6_gateway || undefined) : undefined
           } : undefined,
-          extraShellCommands
         })
         finalConfigPayload = vmResult.configPayload
         console.log(`[Admin Create Instance] VM network-config 已更新: IPv4=${staticIPv4 || 'dhcp'}, IPv6=${staticIPv6 || 'none'}`)
@@ -3143,7 +3197,6 @@ export default async function adminBillingRoutes(app: FastifyInstance): Promise<
             ipv6Address: staticIPv6 ? `${staticIPv6}/128` : undefined,
             ipv6Gateway: staticIPv6 ? 'fe80::1' : undefined
           },
-          extraShellCommands
         })
         finalConfigPayload = containerResult.configPayload
         console.log(`[Admin Create Instance] Container network-config 已更新: IPv4=${staticIPv4}, IPv6=${staticIPv6 || 'none'}`)
@@ -3323,7 +3376,7 @@ export default async function adminBillingRoutes(app: FastifyInstance): Promise<
           status: 'creating',
           user: { id: targetUser.id, username: targetUser.username },
           sshPort: metaData.sshPort,
-          rootPassword: metaData.rootPassword,
+          ...(requestedRootPassword !== undefined ? { rootPassword: metaData.rootPassword } : {}),
           isPaid: !!selectedPlan,
           planName: selectedPlan?.name ?? null,
           charged: chargeFirstMonth,

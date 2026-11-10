@@ -4,7 +4,6 @@ import router from './router'
 import i18n, { getLocale } from './locales'
 import App from './App.vue'
 import './styles/main.css'
-import 'flag-icons/css/flag-icons.min.css'
 
 const app = createApp(App)
 const pinia = createPinia()

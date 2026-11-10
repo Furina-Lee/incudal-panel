@@ -294,6 +294,30 @@ export default async function userRoutes(fastify: FastifyInstance) {
   })
 
   // 获取用户详情
+  fastify.get<{ Params: { id: string } }>('/:id/ssh-keys', {
+    onRequest: [fastify.authenticate, fastify.requireAdmin]
+  }, async (request, reply) => {
+    const userId = Number(request.params.id)
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return reply.code(400).send(apiError(ErrorCode.INVALID_ID))
+    }
+
+    const keys = await prisma.sshKey.findMany({
+      where: { userId },
+      select: { id: true, name: true, fingerprint: true, createdAt: true },
+      orderBy: { createdAt: 'desc' }
+    })
+
+    return {
+      keys: keys.map(key => ({
+        id: key.id,
+        name: key.name,
+        fingerprint: key.fingerprint,
+        createdAt: key.createdAt.toISOString()
+      }))
+    }
+  })
+
   fastify.get<{ Params: { id: string } }>('/:id', {
     onRequest: [fastify.authenticate]
   }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {

@@ -470,6 +470,8 @@ async function runBatchAudit() {
 const dangerousAction = ref<'rebuild' | 'recreate'>('recreate')
 const selectedImageId = ref<number | null>(null)
 const selectedSshKeyId = ref<number | null>(null)
+const authMethod = ref<'ssh_key' | 'password'>('ssh_key')
+const rebuildRootPassword = ref('')
 const selectedCustomInitCommandIds = ref<number[]>([])
 const confirmationText = ref('')
 const riskAccepted = ref(false)
@@ -573,10 +575,23 @@ const selectedImageAlias = computed(() => {
   return selectedImage.value?.remoteAlias || ''
 })
 
+watch(dangerousAction, (action) => {
+  if (action === 'recreate') {
+    rebuildRootPassword.value = ''
+    authMethod.value = 'ssh_key'
+  } else if (authMethod.value === 'ssh_key' && availableSshKeys.value.length === 0) {
+    authMethod.value = 'password'
+  }
+})
+
 const isDangerFormValid = computed(() => {
   if (!previewResult.value) return false
   if (!selectedImageId.value) return false
   if (!riskAccepted.value) return false
+  if (dangerousAction.value === 'rebuild') {
+    const hasCredential = authMethod.value === 'ssh_key' ? selectedSshKeyId.value !== null : rebuildRootPassword.value.length >= 8
+    if (!hasCredential) return false
+  }
   return confirmationText.value.trim() === confirmationExpectedText.value
 })
 
@@ -638,6 +653,8 @@ function resetDangerState() {
   dangerousAction.value = 'recreate'
   selectedImageId.value = null
   selectedSshKeyId.value = null
+  authMethod.value = 'ssh_key'
+  rebuildRootPassword.value = ''
   selectedCustomInitCommandIds.value = []
   confirmationText.value = ''
   riskAccepted.value = false
@@ -1222,7 +1239,8 @@ async function runDangerousAction() {
     latestInstanceActionResult.value = await api.hosts.opsInstanceDangerousAction(props.hostId, selectedManaged.value.dbId, {
       action: dangerousAction.value,
       imageAlias: selectedImageAlias.value,
-      sshKeyId: selectedSshKeyId.value || undefined,
+      sshKeyId: dangerousAction.value === 'rebuild' && authMethod.value === 'ssh_key' ? selectedSshKeyId.value || undefined : undefined,
+      rootPassword: dangerousAction.value === 'rebuild' && authMethod.value === 'password' ? rebuildRootPassword.value : undefined,
       customInitCommandIds: selectedCustomInitCommandIds.value.length > 0 ? selectedCustomInitCommandIds.value : undefined,
       confirmationText: confirmationText.value.trim(),
       riskConfirmed: riskAccepted.value
@@ -1655,8 +1673,22 @@ async function runAuditKillProcess() {
             </div>
           </div>
 
-          <!-- 可选恢复参数 -->
-          <div>
+          <!-- Rebuild credential -->
+          <div v-if="dangerousAction === 'rebuild'" class="space-y-3">
+            <label class="block text-xs text-themed-muted">{{ t('rebuildModal.loginMethod') }}</label>
+            <div class="flex flex-wrap gap-4 text-sm">
+              <label class="flex items-center gap-2 cursor-pointer"><input v-model="authMethod" type="radio" value="ssh_key" />{{ t('rebuildModal.useSshKey') }}</label>
+              <label class="flex items-center gap-2 cursor-pointer"><input v-model="authMethod" type="radio" value="password" />{{ t('rebuildModal.useCustomPassword') }}</label>
+            </div>
+            <select v-if="authMethod === 'ssh_key'" v-model="selectedSshKeyId" class="input">
+              <option :value="null">{{ t('rebuildModal.selectSshKey') }}</option>
+              <option v-for="key in availableSshKeys" :key="key.id" :value="key.id">{{ key.name }}</option>
+            </select>
+            <input v-else v-model="rebuildRootPassword" type="password" class="input" minlength="8" maxlength="128" :placeholder="t('rebuildModal.passwordPlaceholder')" />
+          </div>
+
+          <!-- Recreate can keep the existing optional SSH-key behavior. -->
+          <div v-if="dangerousAction === 'recreate'">
             <label class="block text-xs text-themed-muted mb-1.5">{{ t('admin.hosts.ops.selectSshKey') }}</label>
             <div v-if="loadingSshKeys" class="text-xs text-themed-muted">{{ t('admin.hosts.ops.loadingSshKeys') }}</div>
             <select v-else v-model="selectedSshKeyId" class="input">

@@ -25,7 +25,7 @@ import {
 } from '../lib/incus/index.js'
 import { deleteSnapshot } from '../lib/incus/incus-snapshots.js'
 import { generateIncusConfig, generateRandomPassword } from '../lib/incus-config-generator.js'
-import { encryptSensitiveData, decryptSensitiveData, validateName } from '../lib/security.js'
+import { encryptSensitiveData, decryptSensitiveData, validateName, validatePassword } from '../lib/security.js'
 import {
   consumeOperationVerification
 } from '../lib/operation-verification.js'
@@ -1227,7 +1227,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
     }
 
     // ==================== 阶段 2.5: 验证用户自定义初始化命令 =====================
-    let extraShellCommands: string | undefined
+    let initTemplateScript: string | undefined
     if (customInitCommandIds && customInitCommandIds.length > 0) {
       // 验证命令所有权和启用状态
       const cmdValidation = await validateCommandsOwnership(customInitCommandIds, user.id)
@@ -1245,13 +1245,19 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: 'Selected init templates are incompatible with the selected image', code: 'INIT_TEMPLATE_DISTRO_MISMATCH' })
       }
       if (compatibleCmds.length > 0) {
-        extraShellCommands = mergeCommandContents(compatibleCmds)
+        initTemplateScript = mergeCommandContents(compatibleCmds)
       }
     }
 
     if (initScript && Buffer.byteLength(initScript, 'utf8') > 64 * 1024) {
       return reply.code(400).send({ error: 'Initialization script exceeds 64KB', code: 'INIT_SCRIPT_TOO_LARGE' })
     }
+    const combinedInitScript = [initTemplateScript, initScript?.trim()].filter(Boolean).join('\n')
+    if (Buffer.byteLength(combinedInitScript, 'utf8') > 128 * 1024) {
+      return reply.code(400).send({ error: 'Combined initialization scripts exceed 128KB', code: 'INIT_SCRIPT_TOO_LARGE' })
+    }
+    const encryptedInitScript = combinedInitScript ? encryptSensitiveData(combinedInitScript) : undefined
+
     // ==================== 阶段三: 生成配置 =====================
     // SSH 端口固定为 22（不再使用随机端口）
     const autoPassword = generateRandomPassword(16)
@@ -1261,8 +1267,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
       rootPassword: autoPassword,
       sshKey: sshKey,
       networkMode,
-      type: effectiveInstanceType === 'vm' ? 'virtual-machine' : 'container',
-      extraShellCommands
+      type: effectiveInstanceType === 'vm' ? 'virtual-machine' : 'container'
     })
 
     // ==================== 阶段四: 标识符生成 ====================
@@ -1301,6 +1306,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
     let staticIPv6: string | null = null
     let selectedStoragePool: string | null = null
     let planBandwidthLimit: string | null = null  // 方案带宽限制（事务中计算）
+    let initializationTaskId: number | null = null
 
     try {
       const result = await prisma.$transaction(async (tx) => {
@@ -1480,6 +1486,20 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
           }
         })
 
+        const initializationTask = encryptedInitScript
+          ? await tx.instanceTask.create({
+              data: {
+                instanceId: instance.id,
+                hostId: lockedHost.id,
+                userId: user.id,
+                taskType: 'initialize',
+                status: 'PENDING',
+                imageAlias: actualImageAlias,
+                initScript: encryptedInitScript
+              }
+            })
+          : null
+
         // 更新余额日志，添加 instanceId（因为创建时实例还不存在）
         if (balanceLogId) {
           await tx.balanceLog.update({
@@ -1531,10 +1551,10 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
             tx
           )
 
-          return { instanceId: instance.id, host: lockedHost, hostingIncomeResult, actualPrice, planBandwidthLimit }
+          return { instanceId: instance.id, host: lockedHost, hostingIncomeResult, actualPrice, planBandwidthLimit, initializationTaskId: initializationTask?.id ?? null }
         }
 
-        return { instanceId: instance.id, host: lockedHost, hostingIncomeResult: null, actualPrice: 0, planBandwidthLimit }
+        return { instanceId: instance.id, host: lockedHost, hostingIncomeResult: null, actualPrice: 0, planBandwidthLimit, initializationTaskId: initializationTask?.id ?? null }
       }, {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
         timeout: 15000  // 增加超时时间，因为包含行锁操作
@@ -1543,6 +1563,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
       instanceId = result.instanceId
       host = result.host
       planBandwidthLimit = result.planBandwidthLimit
+      initializationTaskId = result.initializationTaskId
 
       // 事务完成后，发送托管收入通知（仅发送到外部渠道，不创建站内信）
       if (result.hostingIncomeResult) {
@@ -1730,8 +1751,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
           dns: ['10.10.0.1'],
           ipv6Address: staticIPv6 ? `${staticIPv6}` : undefined,
           ipv6Gateway: staticIPv6 ? (hostWithIpv6.ipv6_gateway || undefined) : undefined
-        } : undefined,
-        extraShellCommands
+        } : undefined
       })
       finalConfigPayload = vmResult.configPayload
       console.log(`[Provisioning] VM network-config 已更新: IPv4=${staticIPv4 || 'dhcp'}, IPv6=${staticIPv6 || 'none'}`)
@@ -1750,8 +1770,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
           dns: ['10.10.0.1'],
           ipv6Address: staticIPv6 ? `${staticIPv6}/128` : undefined,
           ipv6Gateway: staticIPv6 ? 'fe80::1' : undefined
-        },
-        extraShellCommands
+        }
       })
       finalConfigPayload = containerResult.configPayload
       console.log(`[Provisioning] Container network-config 已更新: IPv4=${staticIPv4}, IPv6=${staticIPv6 || 'none'}`)
@@ -1805,7 +1824,6 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
       swapEnabled: false,
       swapSize: effectiveInstanceType === 'container' ? (selectedPlan?.swapSize ?? null) : null,
       cloudInitConfig: finalConfigPayload,
-      initScript: initScript?.trim() ? encryptSensitiveData(initScript.trim()) : undefined,
       networkMode,
       nested: Boolean(pkg.nested),
       privileged: Boolean(pkg.privileged),
@@ -1848,7 +1866,8 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
         host: host.name,
         status: 'creating',
         sshPort: metaData.sshPort,
-        rootPassword: metaData.rootPassword
+        rootPassword: metaData.rootPassword,
+        initializationTaskId
       }
     })
   })
@@ -3119,7 +3138,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
   // 重装系统
   fastify.post<{
     Params: { id: string }
-    Body: { image: string; sshKeyId?: number; imageAlias?: string; customInitCommandIds?: number[]; initScript?: string }
+    Body: { image: string; sshKeyId?: number; rootPassword?: string; imageAlias?: string; customInitCommandIds?: number[]; initScript?: string }
   }>('/:id/rebuild', {
     onRequest: [fastify.authenticateUser],
     schema: {
@@ -3128,7 +3147,8 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
         properties: {
           image: { type: 'string' },
           imageAlias: { type: 'string' },
-          sshKeyId: { type: 'integer' },
+          sshKeyId: { type: 'integer', minimum: 1 },
+          rootPassword: { type: 'string', minLength: 8, maxLength: 128 },
           customInitCommandIds: { type: 'array', items: { type: 'integer' }, maxItems: 20 },
           initScript: { type: 'string', maxLength: 65536 }
         }
@@ -3136,7 +3156,7 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
     }
   }, async (request: FastifyRequest<{
     Params: { id: string }
-    Body: { image: string; sshKeyId?: number; imageAlias?: string; customInitCommandIds?: number[]; initScript?: string }
+    Body: { image: string; sshKeyId?: number; rootPassword?: string; imageAlias?: string; customInitCommandIds?: number[]; initScript?: string }
   }>, reply: FastifyReply) => {
     const { id } = request.params
     const instanceId = Number(id)
@@ -3227,12 +3247,24 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
     }
 
     // 验证 SSH 密钥（如果提供）
-    const { sshKeyId, customInitCommandIds, initScript } = request.body
+    const { sshKeyId, rootPassword, customInitCommandIds, initScript } = request.body
+    if (sshKeyId !== undefined && rootPassword !== undefined) {
+      return reply.code(400).send({ error: '请选择 SSH 密钥或自定义密码，不能同时使用两种方式', code: 'REBUILD_CREDENTIAL_CONFLICT' })
+    }
+    if (rootPassword !== undefined) {
+      const passwordCheck = validatePassword(rootPassword)
+      if (!passwordCheck.valid) {
+        return reply.code(400).send({ error: passwordCheck.message || '自定义密码不符合强度要求', code: 'INVALID_ROOT_PASSWORD' })
+      }
+    }
     if (sshKeyId) {
       const keyRecord = await db.getSSHKeyById(sshKeyId)
       if (!keyRecord || keyRecord.user_id !== user.id) {
         return reply.code(400).send(apiError(ErrorCode.SSH_KEY_NOT_OWNED))
       }
+    }
+    if (sshKeyId === undefined && rootPassword === undefined) {
+      return reply.code(400).send({ error: '请选择 SSH 密钥或输入自定义密码', code: 'REBUILD_CREDENTIAL_REQUIRED' })
     }
 
     // 验证自定义初始化命令（如果提供）
@@ -3263,7 +3295,8 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
       imageAlias,
       sshKeyId,
       customInitCommandIds,
-      initScript: taskScript ? encryptSensitiveData(taskScript) : undefined
+      initScript: taskScript ? encryptSensitiveData(taskScript) : undefined,
+      rootPassword: rootPassword ? encryptSensitiveData(rootPassword) : undefined
     })
 
     await createLog(user.id, 'instance', 'instance.rebuild', `Queued rebuild task for instance "${instance.name}" with image ${imageAlias}`, 'success', { instanceId })
@@ -5537,12 +5570,22 @@ export default async function instanceRoutes(fastify: FastifyInstance) {
       return reply.code(403).send(apiError(ErrorCode.FORBIDDEN))
     }
 
-    const task = await getActiveTaskForInstance(instanceId)
+    const task = await prisma.instanceTask.findFirst({
+      where: { instanceId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
+    })
     if (!task) {
       return { task: null }
     }
 
-    // 获取队列位置
+    // Do not return stale terminal actions as the current task after seven days.
+    if (task.status === 'COMPLETED' || task.status === 'FAILED') {
+      const terminalAt = task.finishedAt || task.createdAt
+      if (Date.now() - terminalAt.getTime() > 7 * 24 * 60 * 60 * 1000) {
+        return { task: null }
+      }
+    }
+
     const queuePosition = task.status === 'PENDING' ? await getTaskQueuePosition(task.id, task.hostId) : 0
 
     return {
@@ -6078,7 +6121,6 @@ async function createInstanceAsync(
     swapEnabled?: boolean
     swapSize?: number | null
     cloudInitConfig?: Record<string, string>
-    initScript?: string
     networkMode: 'nat' | 'nat_ipv6' | 'nat_ipv6_nat' | 'ipv6_only' | 'ipv6_nat'
     nested?: boolean
     privileged?: boolean
@@ -6233,17 +6275,6 @@ async function createInstanceAsync(
       return
     }
 
-    if (config.initScript) {
-      await createInstanceTask({
-        instanceId,
-        hostId: host.id,
-        userId,
-        taskType: 'initialize',
-        imageAlias: config.image,
-        initScript: config.initScript
-      })
-    }
-
     // 创建 IP 地址记录 (新双网卡架构: eth0=IPv4, eth1=IPv6)
     if (ipv4) {
       try {
@@ -6359,6 +6390,19 @@ async function createInstanceAsync(
         status: 'error'
       }
     })
+
+    if (updateResult.count > 0) {
+      await prisma.instanceTask.updateMany({
+        where: { instanceId, status: 'PENDING' },
+        data: {
+          status: 'FAILED',
+          error: '实例创建失败，初始化脚本未执行',
+          initScript: null,
+          rootPassword: null,
+          finishedAt: new Date()
+        } as any
+      })
+    }
 
     // 只有成功更新状态时才回滚资源（避免与超时清理任务双重回滚）
     if (updateResult.count > 0 && userId && resources) {

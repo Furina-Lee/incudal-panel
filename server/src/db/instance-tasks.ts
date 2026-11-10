@@ -14,6 +14,7 @@ export interface CreateInstanceTaskData {
   sshKeyId?: number         // 重装使用的 SSH 密钥 ID
   customInitCommandIds?: number[]  // 重装使用的自定义初始化命令 ID 列表
   initScript?: string // 已加密的一次性初始化脚本
+  rootPassword?: string // 已加密的重装密码
   targetName?: string       // 克隆的目标名称
   targetHostId?: number     // 克隆的目标宿主机
   snapshotName?: string     // 克隆时的快照名称
@@ -32,6 +33,7 @@ export interface InstanceTaskWithDetails {
   sshKeyId: number | null
   customInitCommandIds: string | null  // JSON 字符串，解析后为 number[]
   initScript: string | null
+  rootPassword: string | null
   targetName: string | null
   targetHostId: number | null
   snapshotName: string | null
@@ -57,6 +59,7 @@ export async function createInstanceTask(data: CreateInstanceTaskData): Promise<
       sshKeyId: data.sshKeyId || null,
       customInitCommandIds: data.customInitCommandIds ? JSON.stringify(data.customInitCommandIds) : null,
       initScript: data.initScript || null,
+      rootPassword: data.rootPassword || null,
       targetName: data.targetName || null,
       targetHostId: data.targetHostId || null,
       snapshotName: data.snapshotName || null,
@@ -85,7 +88,7 @@ export async function getActiveTaskForInstance(instanceId: number): Promise<Inst
       instanceId,
       status: { in: ['PENDING', 'PROCESSING'] }
     },
-    orderBy: { createdAt: 'desc' }
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
   })
   return result as unknown as InstanceTaskWithDetails | null
 }
@@ -151,12 +154,17 @@ export async function updateInstanceTaskProgress(taskId: number, progress: strin
   })
 }
 
-/** 清空一次性初始化脚本密文。 */
-export async function clearInstanceTaskInitScript(taskId: number): Promise<void> {
+/** 清空一次性初始化脚本和密码密文。 */
+export async function clearInstanceTaskSecrets(taskId: number): Promise<void> {
   await prisma.instanceTask.update({
     where: { id: taskId },
-    data: { initScript: null } as any
+    data: { initScript: null, rootPassword: null } as any
   })
+}
+
+/** @deprecated Use clearInstanceTaskSecrets. */
+export async function clearInstanceTaskInitScript(taskId: number): Promise<void> {
+  await clearInstanceTaskSecrets(taskId)
 }
 
 /**
@@ -215,6 +223,7 @@ export async function cancelInstanceTask(taskId: number): Promise<InstanceTaskWi
       status: 'FAILED',
       error: '用户取消',
       initScript: null,
+      rootPassword: null,
       finishedAt: new Date()
     }
   })

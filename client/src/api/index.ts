@@ -875,7 +875,7 @@ const api = {
     get: (id: number): Promise<InstanceWithDetails> => http.get(`/instances/${id}`),
     getPassword: (id: number): Promise<{ rootPassword: string | null }> => http.get(`/instances/${id}/password`),
     getStats: (id: number): Promise<InstanceStats & { status?: string }> => http.get(`/instances/${id}/stats`),
-    create: (data: CreateInstanceRequest): Promise<Instance> => http.post('/instances', data),
+    create: (data: CreateInstanceRequest): Promise<Instance & { initializationTaskId?: number | null }> => http.post('/instances', data),
     getAvailableHosts: (params: Record<string, unknown> = {}): Promise<AvailableHost[]> =>
       http.get('/instances/available-hosts', { params }),
     getChangeHostOptions: (id: number): Promise<ChangeHostOptionsResponse> =>
@@ -926,7 +926,7 @@ const api = {
         newInstanceId?: number | null
       }
     }> => http.get(`/instances/tasks/${taskId}`),
-    rebuild: (id: number, data: { image: string; sshKeyId?: number; customInitCommandIds?: number[]; initScript?: string }): Promise<{ message: string; taskId: number; status: string }> =>
+    rebuild: (id: number, data: { image: string; sshKeyId?: number; rootPassword?: string; customInitCommandIds?: number[]; initScript?: string }): Promise<{ message: string; taskId: number; status: string }> =>
       http.post(`/instances/${id}/rebuild`, data),
     recreate: (id: number, data: { image: string; sshKeyId?: number; customInitCommandIds?: number[] }): Promise<{ message: string; taskId: number; status: string }> =>
       http.post(`/instances/${id}/recreate`, data),
@@ -1324,6 +1324,7 @@ const api = {
         username: string
         status: string
         hasSshKey: boolean
+        sshKeys?: Array<{ id: number; name: string; fingerprint: string; createdAt: string }>
       }
     }> => http.get(`/hosts/${hostId}/users/lookup`, { params: { username } }),
     getImagePolicy: (id: number): Promise<HostImagePolicy> => http.get(`/hosts/${id}/images`),
@@ -1481,6 +1482,8 @@ const api = {
       disk?: number
       planId?: number
       giftDays?: number
+      sshKeyId?: number
+      rootPassword?: string
     }): Promise<{
       message: string
       instance: {
@@ -1496,6 +1499,8 @@ const api = {
         amount: number
         expiresAt: string | null
         giftDays?: number | null
+        sshPort?: number
+        rootPassword?: string
       }
     }> => http.post(`/hosts/${hostId}/instances/create-for-user`, data),
     // 修改付费实例的续费价格（托管节点所有者专用）
@@ -1515,14 +1520,21 @@ const api = {
       ipv4ChangedCount: number
       failedCount: number
     }> => http.post(`/hosts/${hostId}/instances/sync-status`, { instanceIds }, { timeout: TIMEOUT.MEDIUM }),
-    // 资源校对：重新计算宿主机资源使用量，并将配额对齐到已用配额
+    // Recalculate usage counters without changing configured CPU/memory limits.
     recalculateResources: (hostId: number): Promise<{
       message: string
       hasChanges: boolean
-      before: { cpuUsed: number; memoryUsed: number; diskUsed: number; natPortsUsedCount: number; cpuAllowanceMax: number; memoryMax: number }
-      after: { cpuUsed: number; memoryUsed: number; diskUsed: number; natPortsUsedCount: number; cpuAllowanceMax: number; memoryMax: number }
-      diff: { cpuUsed: number; memoryUsed: number; diskUsed: number; natPortsUsedCount: number; cpuAllowanceMax: number; memoryMax: number }
+      before: { cpuUsed: number; memoryUsed: number; diskUsed: number; natPortsUsedCount: number }
+      after: { cpuUsed: number; memoryUsed: number; diskUsed: number; natPortsUsedCount: number }
+      diff: { cpuUsed: number; memoryUsed: number; diskUsed: number; natPortsUsedCount: number }
     }> => http.post(`/hosts/${hostId}/recalculate-resources`),
+    alignHostQuotasToUsage: (hostId: number): Promise<{
+      message: string
+      hasChanges: boolean
+      before: { cpuAllowanceMax: number; memoryMax: number }
+      after: { cpuAllowanceMax: number; memoryMax: number }
+      diff: { cpuAllowanceMax: number; memoryMax: number }
+    }> => http.post(`/hosts/${hostId}/align-quotas`),
     // 批量封停实例
     batchSuspendInstances: (hostId: number, instanceIds: number[], reason?: string): Promise<{
       message: string
@@ -1740,6 +1752,7 @@ const api = {
       action: 'rebuild' | 'recreate'
       imageAlias: string
       sshKeyId?: number
+      rootPassword?: string
       customInitCommandIds?: number[]
       confirmationText: string
       riskConfirmed: boolean
@@ -4204,6 +4217,8 @@ const api = {
         status: string
       }
     }> => http.get('/users/lookup', { params: { username } }),
+    listUserSshKeys: (userId: number): Promise<{ keys: Array<{ id: number; name: string; fingerprint: string; createdAt: string }> }> =>
+      http.get(`/users/${userId}/ssh-keys`),
 
     // ==================== 实例管理 ====================
 
@@ -4220,6 +4235,8 @@ const api = {
       customInitCommandIds?: number[]
       planId?: number           // 付费方案ID（传入则创建付费实例）
       chargeFirstMonth?: boolean // 是否扣除首月费用（默认 true）
+      sshKeyId?: number
+      rootPassword?: string
     }): Promise<{
       message: string
       instance: {

@@ -12,7 +12,7 @@ import PackageSelector from '@/components/instance/PackageSelector.vue'
 import ResourceSliders from '@/components/instance/ResourceSliders.vue'
 import HostSelector from '@/components/instance/HostSelector.vue'
 import ImageSelector from '@/components/instance/ImageSelector.vue'
-import type { Package, AvailableHost, PackagePlan } from '@/types/api'
+import type { Package, AvailableHost, PackagePlan, SshKey } from '@/types/api'
 import { validateName as validateInstanceName } from '@/utils/validation'
 import { translateError } from '@/utils/errorHandler'
 
@@ -44,6 +44,11 @@ const usernameInput = ref('')
 const usernameValid = ref<boolean | null>(null)
 const usernameChecking = ref(false)
 const targetUser = ref<{ id: number; username: string; balance?: number } | null>(null)
+const targetSshKeys = ref<SshKey[]>([])
+const authMethod = ref<'ssh_key' | 'password'>('ssh_key')
+const selectedSshKeyId = ref<number | null>(null)
+const customRootPassword = ref('')
+const createdCredentials = ref<{ sshPort: number; rootPassword: string } | null>(null)
 
 // 实例类型选择：免费/付费
 const instanceType = ref<'free' | 'paid'>('free')
@@ -126,6 +131,9 @@ const canSubmit = computed<boolean>(() => {
          availableImages.value.length > 0 &&
          usernameValid.value === true &&
          targetUser.value !== null &&
+         (authMethod.value === 'ssh_key'
+           ? selectedSshKeyId.value !== null
+           : customRootPassword.value.length >= 8) &&
          !submitting.value
   
   // 付费实例需要选择方案且余额充足
@@ -156,11 +164,26 @@ onMounted(async (): Promise<void> => {
   }
 })
 
+watch(usernameInput, (value) => {
+  if (targetUser.value && value.trim() !== targetUser.value.username) {
+    usernameValid.value = null
+    targetUser.value = null
+    targetSshKeys.value = []
+    selectedSshKeyId.value = null
+    customRootPassword.value = ''
+    createdCredentials.value = null
+  }
+})
+
 // 验证用户名
 async function checkUsername(): Promise<void> {
   if (!usernameInput.value.trim()) {
     usernameValid.value = null
     targetUser.value = null
+    targetSshKeys.value = []
+    selectedSshKeyId.value = null
+    customRootPassword.value = ''
+    createdCredentials.value = null
     return
   }
 
@@ -169,11 +192,20 @@ async function checkUsername(): Promise<void> {
     // 使用精确查找接口，按用户名绝对匹配
     const res = await api.admin.lookupUser(usernameInput.value.trim()) as any
     usernameValid.value = true
-    targetUser.value = { 
-      id: res.user.id, 
+    targetUser.value = {
+      id: res.user.id,
       username: res.user.username,
       balance: res.user.balance ?? 0
     }
+    const keyResponse = await api.admin.listUserSshKeys(res.user.id)
+    targetSshKeys.value = keyResponse.keys.map(key => ({
+      id: key.id,
+      name: key.name,
+      fingerprint: key.fingerprint,
+      createdAt: key.createdAt
+    }))
+    selectedSshKeyId.value = targetSshKeys.value[0]?.id ?? null
+    createdCredentials.value = null
   } catch {
     usernameValid.value = false
     targetUser.value = null
@@ -542,7 +574,10 @@ async function handleSubmit(): Promise<void> {
       name: form.value.name,
       packageId: form.value.packageId,
       hostId: form.value.hostId,
-      image: form.value.image
+      image: form.value.image,
+      ...(authMethod.value === 'ssh_key'
+        ? { sshKeyId: selectedSshKeyId.value! }
+        : { rootPassword: customRootPassword.value })
     }
 
     // 付费实例参数
@@ -560,16 +595,20 @@ async function handleSubmit(): Promise<void> {
 
     toast.success(t('admin.instanceCreate.success'))
 
-    // 显示创建结果
     const instance = (res as any).instance
     if (instance?.rootPassword) {
-      toast.info(`SSH Port: ${instance.sshPort}, Password: ${instance.rootPassword}`, 10000)
+      createdCredentials.value = { sshPort: instance.sshPort, rootPassword: instance.rootPassword }
+      toast.info(t('admin.instanceCreate.credentialsReady'), 10000)
     }
 
     // 重置表单
     usernameInput.value = ''
     usernameValid.value = null
     targetUser.value = null
+    targetSshKeys.value = []
+    selectedSshKeyId.value = null
+    customRootPassword.value = ''
+    authMethod.value = 'ssh_key'
     form.value.name = ''
     instanceType.value = 'free'
     chargeFirstMonth.value = true
@@ -600,6 +639,14 @@ async function handleSubmit(): Promise<void> {
         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
       </svg>
       {{ $t('common.loading') }}
+    </div>
+
+    <div v-if="createdCredentials" class="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-themed">
+      <div class="font-medium">{{ $t('admin.instanceCreate.credentialsReady') }}</div>
+      <div class="mt-2 font-mono text-xs break-all">SSH Port: {{ createdCredentials.sshPort }}</div>
+      <div class="font-mono text-xs break-all">Password: {{ createdCredentials.rootPassword }}</div>
+      <p class="mt-2 text-xs text-themed-muted">{{ $t('admin.instanceCreate.instancePasswordHint') }}</p>
+      <button type="button" class="btn-secondary btn-sm mt-3" @click="createdCredentials = null">{{ $t('common.close') }}</button>
     </div>
 
     <form v-else class="space-y-6" @submit.prevent="handleSubmit">
@@ -641,6 +688,42 @@ async function handleSubmit(): Promise<void> {
         <p class="text-xs text-themed-muted mt-2">
           {{ $t('admin.instanceCreate.userHint') }}
         </p>
+      </div>
+
+      <div v-if="targetUser" class="card p-5 space-y-3">
+        <h3 class="font-medium text-themed">{{ $t('admin.instanceCreate.loginMethod') }}</h3>
+        <div class="flex flex-wrap gap-4">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input v-model="authMethod" type="radio" value="ssh_key" class="w-4 h-4 accent-blue-500" />
+            <span class="text-themed">{{ $t('admin.instanceCreate.useSshKey') }}</span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input v-model="authMethod" type="radio" value="password" class="w-4 h-4 accent-blue-500" />
+            <span class="text-themed">{{ $t('admin.instanceCreate.useCustomPassword') }}</span>
+          </label>
+        </div>
+        <div v-if="authMethod === 'ssh_key'" class="space-y-2">
+          <select v-model.number="selectedSshKeyId" class="input w-full" required>
+            <option :value="null" disabled>{{ $t('admin.instanceCreate.selectSshKey') }}</option>
+            <option v-for="key in targetSshKeys" :key="key.id" :value="key.id">
+              {{ key.name }} · {{ key.fingerprint }}
+            </option>
+          </select>
+          <p v-if="targetSshKeys.length === 0" class="text-xs text-themed-muted">{{ $t('admin.instanceCreate.noSshKeyUsePassword') }}</p>
+        </div>
+        <div v-else class="space-y-2">
+          <input
+            v-model="customRootPassword"
+            type="password"
+            class="input w-full"
+            autocomplete="new-password"
+            :placeholder="$t('admin.instanceCreate.customPasswordPlaceholder')"
+            minlength="8"
+            maxlength="128"
+            required
+          />
+          <p class="text-xs text-themed-muted">{{ $t('admin.instanceCreate.instancePasswordHint') }}</p>
+        </div>
       </div>
 
       <!-- 套餐选择 -->

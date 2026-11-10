@@ -24,7 +24,7 @@ import { listSnapshots, deleteSnapshot as deleteIncusSnapshot } from '../lib/inc
 import { sendNotification } from '../lib/notifier.js'
 import { createLog } from '../db/logs.js'
 import * as db from '../db/index.js'
-import { updateInstanceTaskProgress, updateInstanceTaskStatus, clearInstanceTaskInitScript } from '../db/instance-tasks.js'
+import { updateInstanceTaskProgress, updateInstanceTaskStatus, clearInstanceTaskSecrets } from '../db/instance-tasks.js'
 import { closeInstanceSessions } from '../lib/terminal-proxy.js'
 import { generateIncusConfig, generateRandomPassword } from '../lib/incus-config-generator.js'
 import { encryptSensitiveData, decryptSensitiveData } from '../lib/security.js'
@@ -42,7 +42,7 @@ import {
 } from '../db/advisory-locks.js'
 import { createWorkerDbBackoff } from './db-failure-backoff.js'
 
-import { resetInstanceCloudInitState } from '../lib/cloud-init-status.js'
+import { resetInstanceCloudInitState, detectCloudInitStatus } from '../lib/cloud-init-status.js'
 import { resolveIncusSwapValue } from '../lib/instance-swap.js'
 import { selectBindableIpv4ListenAddress } from '../lib/network-address.js'
 import { getSystemImageAvailabilityForHost } from '../db/images.js'
@@ -126,17 +126,29 @@ function extractIPv6(state: { network?: Record<string, { addresses?: Array<{ fam
  * 服务启动时清理僵尸任务
  */
 export async function cleanupStaleTasks(): Promise<void> {
-  const result = await prisma.instanceTask.updateMany({
-    where: { status: 'PROCESSING' },
+  const requeuedInitialization = await prisma.instanceTask.updateMany({
+    where: { status: 'PROCESSING', taskType: 'initialize' },
+    data: {
+      status: 'PENDING',
+      progress: 'queued_after_restart',
+      error: '系统重启，初始化任务将重试',
+      startedAt: null,
+      finishedAt: null
+    }
+  })
+  const failedOtherTasks = await prisma.instanceTask.updateMany({
+    where: { status: 'PROCESSING', taskType: { not: 'initialize' } },
     data: {
       status: 'FAILED',
       error: '系统重启，任务中断',
       initScript: null,
+      rootPassword: null,
       finishedAt: new Date()
     }
   })
-  if (result.count > 0) {
-    console.log(`[InstanceTaskWorker] 清理了 ${result.count} 个僵尸任务`)
+  const total = requeuedInitialization.count + failedOtherTasks.count
+  if (total > 0) {
+    console.log(`[InstanceTaskWorker] 清理了 ${total} 个僵尸任务，重试初始化 ${requeuedInitialization.count} 个`)
   }
 }
 
@@ -166,6 +178,7 @@ async function cleanupTimeoutTasks(): Promise<void> {
       status: 'FAILED',
       error: '任务执行超时',
       initScript: null,
+      rootPassword: null,
       finishedAt: new Date()
     }
   })
@@ -384,6 +397,7 @@ async function claimNextTask(hostId: number) {
       select: { status: true }
     })
     if (!instance || instance.status === 'deleted') return null
+    if (taskToRun.taskType === 'initialize' && instance.status !== 'running') return null
 
     // 原子标记为 PROCESSING
     const claimedTask = await tx.instanceTask.update({
@@ -476,7 +490,7 @@ async function executeTask(taskId: number): Promise<void> {
     await updateInstanceTaskStatus(taskId, 'COMPLETED', {
       finishedAt: new Date()
     })
-    await clearInstanceTaskInitScript(taskId)
+    await clearInstanceTaskSecrets(taskId)
 
     const taskDuration = Date.now() - taskStartTime
     console.log(`[InstanceTaskWorker] 任务 ${taskId} (${task.taskType}) 完成，耗时 ${taskDuration}ms`)
@@ -489,7 +503,7 @@ async function executeTask(taskId: number): Promise<void> {
       error: errorMessage,
       finishedAt: new Date()
     })
-    await clearInstanceTaskInitScript(taskId)
+    await clearInstanceTaskSecrets(taskId)
 
     // 记录连接池错误
     recordClientError(task.hostId)
@@ -843,21 +857,50 @@ async function executeInitScript(
 }
 
 async function executeInitializeTask(
-  task: { initScript?: string | null; id: number },
-  instance: { incus_id: string },
+  task: { initScript?: string | null; id: number; instanceId: number },
+  instance: { incus_id: string; image: string },
   client: Awaited<ReturnType<typeof getIncusClient>>
 ): Promise<void> {
   if (!task.initScript) return
   const script = decryptSensitiveData(task.initScript)
   if (!script) throw new Error('初始化脚本解密失败')
-  await executeInitScript(script, instance.incus_id, task.id, client)
+
+  await updateInstanceTaskProgress(task.id, 'waiting_cloud_init')
+  const maxAttempts = 120
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    let status
+    try {
+      status = await detectCloudInitStatus(client, {
+        id: task.instanceId,
+        incus_id: instance.incus_id,
+        image: instance.image
+      })
+    } catch {
+      status = null
+    }
+    if (status?.ready) {
+      await executeInitScript(script, instance.incus_id, task.id, client)
+      await prisma.instance.update({
+        where: { id: task.instanceId },
+        data: { status: 'running' }
+      })
+      return
+    }
+
+    if (status?.state === 'agent_unavailable' || status?.state === 'unknown') {
+      // Keep waiting for the guest agent/cloud-init status files to become readable.
+    }
+    await new Promise(resolve => setTimeout(resolve, 5000))
+  }
+
+  throw new Error('等待系统初始化完成超时，初始化脚本未执行')
 }
 
 /**
  * 执行重装任务
  */
 async function executeRebuildTask(
-  task: { id: number; userId: number; instanceId: number; imageAlias: string | null; sshKeyId: number | null; customInitCommandIds?: string | null; initScript?: string | null },
+  task: { id: number; userId: number; instanceId: number; imageAlias: string | null; sshKeyId: number | null; rootPassword?: string | null; customInitCommandIds?: string | null; initScript?: string | null },
   instance: { incus_id: string; name: string; user_id: number; image: string; network_mode: string; ipv4?: string | null; ipv6?: string | null; host_id: number; swap_enabled?: boolean; swap_size?: number | null },
   host: { name: string },
   client: Awaited<ReturnType<typeof getIncusClient>>
@@ -917,26 +960,20 @@ async function executeRebuildTask(
   // 执行重装
   await updateInstanceTaskProgress(task.id, 'rebuilding')
 
-  // 获取 SSH 密钥：优先使用任务指定的 sshKeyId，否则取用户第一个密钥
+  // Rebuild credentials are explicit: use the selected owned key or the encrypted custom password.
   let sshKey: string | undefined
   if (task.sshKeyId) {
     const keyRecord = await db.getSSHKeyById(task.sshKeyId)
-    if (keyRecord && keyRecord.user_id === instance.user_id) {
-      sshKey = keyRecord.public_key
+    if (!keyRecord || keyRecord.user_id !== instance.user_id) {
+      throw new Error('重装使用的 SSH 密钥无效或不属于实例所有者')
     }
-  }
-  if (!sshKey) {
-    // 回退：取用户第一个密钥
-    const userSshKeys = await db.getSSHKeysByUserId(instance.user_id)
-    sshKey = userSshKeys && userSshKeys.length > 0 ? userSshKeys[0].public_key : undefined
+    sshKey = keyRecord.public_key
   }
 
-  // SSH key is optional; password login still remains available when no key is present.
-  if (!sshKey) {
-    console.warn(`[Rebuild] Instance ${task.instanceId} has no SSH key; continuing without injecting authorized_keys`)
-  }
-
-  const newPassword = generateRandomPassword(16)
+  const newPassword = task.rootPassword
+    ? decryptSensitiveData(task.rootPassword)
+    : generateRandomPassword(16)
+  if (!newPassword) throw new Error('重装密码解密失败')
 
   // 获取实例类型 (container 或 virtual-machine)
   const incusInstance = await getInstance(client, instance.incus_id)
@@ -1149,10 +1186,21 @@ async function executeRebuildTask(
     }
   }
 
-  await db.updateInstanceStatus(task.instanceId, 'running', { ipv4, ipv6 })
   const temporaryScript = task.initScript ? decryptSensitiveData(task.initScript) : null
   if (task.initScript && !temporaryScript) throw new Error('初始化脚本解密失败')
+  await updateInstanceTaskProgress(task.id, 'waiting_cloud_init')
+  for (let attempt = 0; attempt < 120; attempt++) {
+    const cloudInitStatus = await detectCloudInitStatus(client, {
+      id: task.instanceId,
+      incus_id: instance.incus_id,
+      image: imageAlias
+    })
+    if (cloudInitStatus.ready) break
+    if (attempt === 119) throw new Error('等待系统初始化完成超时，初始化脚本未执行')
+    await new Promise(resolve => setTimeout(resolve, 5000))
+  }
   await executeInitScript(temporaryScript || '', instance.incus_id, task.id, client)
+  await db.updateInstanceStatus(task.instanceId, 'running', { ipv4, ipv6 })
 
   const { reconcileTrafficStateForInstanceIds } = await import('../services/traffic-scheduler.js')
   await reconcileTrafficStateForInstanceIds([task.instanceId])
@@ -2574,7 +2622,12 @@ export function startInstanceTaskWorker(): void {
     dbBackoff.arm(err)
   })
 
-  // 定时处理队列
+  // Process persisted tasks immediately, then continue polling.
+  processQueue().catch(err => {
+    console.error('[InstanceTaskWorker] 首次队列处理错误:', err)
+    dbBackoff.arm(err)
+  })
+
   workerInterval = setInterval(() => {
     processQueue().catch(err => {
       console.error('[InstanceTaskWorker] 队列处理错误:', err)

@@ -33,6 +33,7 @@ const authStore = useAuthStore()
 const configStore = useConfigStore()
 const themeStore = useThemeStore()
 const brand = useBrand()
+const appVersion = __APP_VERSION__
 void configStore.loadPublicConfig()
 
 const footerEmailHref = computed(() => {
@@ -346,41 +347,58 @@ function handleLinkClick() {
     </nav>
 
     <!-- 底部 -->
-    <div 
-      v-if="!collapsed || mobileOpen" 
-      class="px-4 py-3 border-t flex items-center justify-between"
+    <div
+      class="px-3 py-3 border-t"
       :class="themeStore.isDark ? 'border-gray-800' : 'border-gray-200'"
     >
-      <div class="text-2xs" :class="themeStore.isDark ? 'text-gray-600' : 'text-gray-500'">{{ brand.brandName }}</div>
-      <div class="flex items-center gap-2">
-        <!-- 邮箱链接 -->
-        <a 
-          v-if="footerEmailHref"
-          :href="footerEmailHref"
-          class="p-1 rounded transition-colors"
-          :class="themeStore.isDark ? 'text-gray-600 hover:text-gray-400 hover:bg-gray-800' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'"
-          title="Email"
-          @click="handleLinkClick"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
-          </svg>
-        </a>
-        <!-- Telegram 链接 -->
-        <a 
-          v-if="footerTelegramLink"
-          :href="footerTelegramLink"
-          target="_blank" 
-          rel="noopener noreferrer"
-          class="p-1 rounded transition-colors"
-          :class="themeStore.isDark ? 'text-gray-600 hover:text-gray-400 hover:bg-gray-800' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'"
-          title="Telegram"
-          @click="handleLinkClick"
-        >
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
-          </svg>
-        </a>
+      <div
+        v-if="!collapsed || mobileOpen"
+        class="flex items-center justify-between gap-2"
+      >
+        <div class="text-2xs truncate" :class="themeStore.isDark ? 'text-gray-600' : 'text-gray-500'">{{ brand.brandName }}</div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <span
+            class="text-2xs font-mono"
+            :title="t('nav.version', { version: `v${appVersion}` })"
+            :class="themeStore.isDark ? 'text-gray-500' : 'text-gray-500'"
+          >{{ t('nav.version', { version: `v${appVersion}` }) }}</span>
+          <!-- 邮箱链接 -->
+          <a
+            v-if="footerEmailHref"
+            :href="footerEmailHref"
+            class="p-1 rounded transition-colors"
+            :class="themeStore.isDark ? 'text-gray-600 hover:text-gray-400 hover:bg-gray-800' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'"
+            title="Email"
+            @click="handleLinkClick"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+            </svg>
+          </a>
+          <!-- Telegram 链接 -->
+          <a
+            v-if="footerTelegramLink"
+            :href="footerTelegramLink"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="p-1 rounded transition-colors"
+            :class="themeStore.isDark ? 'text-gray-600 hover:text-gray-400 hover:bg-gray-800' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'"
+            title="Telegram"
+            @click="handleLinkClick"
+          >
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-.778-.511-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+            </svg>
+          </a>
+        </div>
+      </div>
+      <div
+        v-else
+        class="text-center text-2xs font-mono"
+        :title="t('nav.version', { version: `v${appVersion}` })"
+        :class="themeStore.isDark ? 'text-gray-500' : 'text-gray-500'"
+      >
+        v{{ appVersion }}
       </div>
     </div>
   </aside>

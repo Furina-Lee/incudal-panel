@@ -22,12 +22,12 @@ import { IncusClient, getIncusClient, removeIncusClient } from '../lib/incus/ind
 import { listStoragePools, getStoragePoolResources, createStoragePool, deleteStoragePool, updateStoragePool } from '../lib/incus/incus-storage.js'
 import type { CreateHostRequest, UpdateHostRequest } from '../types/api.js'
 import type { Host } from '../types/database.js'
-import { validateName, validateUrl, validateIpAddress, validateIdentifier, validateIpOrDomain, encryptSensitiveData } from '../lib/security.js'
+import { validateName, validateUrl, validateIpAddress, validateIdentifier, validateIpOrDomain, validatePassword, encryptSensitiveData } from '../lib/security.js'
 import { sendNotification } from '../lib/notifier.js'
 import { sendReleaseNotification } from '../lib/release-notifier.js'
 import { createCaddyClient } from '../lib/caddy-client.js'
 import { normalizeArchitecture } from '../lib/architecture.js'
-import { generateIncusConfig } from '../lib/incus-config-generator.js'
+import { generateIncusConfig, generateRandomPassword } from '../lib/incus-config-generator.js'
 import { sendAdminInstanceCreatedEmail, sendRenewalPriceUpdatedEmail } from '../lib/mailer.js'
 import { generateRandomIPv4, generateRandomIPv6 } from '../lib/ip-calculator.js'
 import { calculateCreateBilling } from '../db/billing-operations.js'
@@ -4318,14 +4318,12 @@ export default async function hostRoutes(fastify: FastifyInstance) {
       return reply.code(403).send(apiError(ErrorCode.FORBIDDEN))
     }
 
-    // 获取校对前的资源使用量
+    // Snapshot usage counters; quota limits are deliberately not changed here.
     const before = {
       cpuUsed: host.cpu_used || 0,
       memoryUsed: host.memory_used || 0,
       diskUsed: host.disk_used || 0,
-      natPortsUsedCount: host.nat_ports_used_count || 0,
-      cpuAllowanceMax: host.cpu_allowance_max || 0,
-      memoryMax: host.memory_max || 0
+      natPortsUsedCount: host.nat_ports_used_count || 0
     }
 
     // 重新计算资源使用量（基于所有非 deleted 状态的实例）
@@ -4348,24 +4346,16 @@ export default async function hostRoutes(fastify: FastifyInstance) {
       diskUsed: usedResources.diskUsed
     })
 
-    // 更新端口使用量，同时将配额对齐到已用配额
     await prisma.host.update({
       where: { id: hostId },
-      data: {
-        natPortsUsedCount: portMappingsCount,
-        // 将配额对齐到已用配额
-        cpuAllowanceMax: usedResources.cpuUsed,
-        memoryMax: usedResources.memoryUsed
-      }
+      data: { natPortsUsedCount: portMappingsCount }
     })
 
     const after = {
       cpuUsed: usedResources.cpuUsed,
       memoryUsed: usedResources.memoryUsed,
       diskUsed: usedResources.diskUsed,
-      natPortsUsedCount: portMappingsCount,
-      cpuAllowanceMax: usedResources.cpuUsed,
-      memoryMax: usedResources.memoryUsed
+      natPortsUsedCount: portMappingsCount
     }
 
     // 计算差异
@@ -4373,23 +4363,89 @@ export default async function hostRoutes(fastify: FastifyInstance) {
       cpuUsed: after.cpuUsed - before.cpuUsed,
       memoryUsed: after.memoryUsed - before.memoryUsed,
       diskUsed: after.diskUsed - before.diskUsed,
-      natPortsUsedCount: after.natPortsUsedCount - before.natPortsUsedCount,
-      cpuAllowanceMax: after.cpuAllowanceMax - before.cpuAllowanceMax,
-      memoryMax: after.memoryMax - before.memoryMax
+      natPortsUsedCount: after.natPortsUsedCount - before.natPortsUsedCount
     }
 
-    const hasChanges = diff.cpuUsed !== 0 || diff.memoryUsed !== 0 || diff.diskUsed !== 0 || diff.natPortsUsedCount !== 0 || diff.cpuAllowanceMax !== 0 || diff.memoryMax !== 0
+    const hasChanges = diff.cpuUsed !== 0 || diff.memoryUsed !== 0 || diff.diskUsed !== 0 || diff.natPortsUsedCount !== 0
 
     await createLog(
       user.id,
       'host',
       'host.recalculate_resources',
-      `Recalculated resources for host "${host.name}": CPU ${before.cpuUsed}→${after.cpuUsed}, Memory ${before.memoryUsed}→${after.memoryUsed}, Disk ${before.diskUsed}→${after.diskUsed}, Ports ${before.natPortsUsedCount}→${after.natPortsUsedCount}, CPUMax ${before.cpuAllowanceMax}→${after.cpuAllowanceMax}, MemMax ${before.memoryMax}→${after.memoryMax}`,
+      `Recalculated usage for host "${host.name}": CPU ${before.cpuUsed}→${after.cpuUsed}, Memory ${before.memoryUsed}→${after.memoryUsed}, Disk ${before.diskUsed}→${after.diskUsed}, Ports ${before.natPortsUsedCount}→${after.natPortsUsedCount}`,
       'success'
     )
 
     return {
-      message: hasChanges ? '资源校对完成，已修正差异' : '资源校对完成，无差异',
+      message: hasChanges ? '资源使用量已重新计算并修正' : '资源使用量正确，无需修正',
+      hasChanges,
+      before,
+      after,
+      diff
+    }
+  })
+
+  // POST /hosts/:id/align-quotas - explicitly align CPU/memory quotas to current usage
+  fastify.post<{
+    Params: { id: string }
+  }>('/:id/align-quotas', {
+    onRequest: [fastify.authenticate]
+  }, async (request, reply) => {
+    const hostId = Number(request.params.id)
+    if (isNaN(hostId)) {
+      return reply.code(400).send(apiError(ErrorCode.INVALID_ID))
+    }
+
+    const host = await db.getHostById(hostId)
+    if (!host) {
+      return reply.code(404).send(apiError(ErrorCode.HOST_NOT_FOUND))
+    }
+
+    if (host.user_id !== request.user.id && request.user.role !== 'admin') {
+      return reply.code(403).send(apiError(ErrorCode.FORBIDDEN))
+    }
+
+    const usedResources = await db.calculateHostResourcesFromInstances(hostId)
+    if (usedResources.memoryUsed > 0 && usedResources.memoryUsed < 256) {
+      return reply.code(400).send({
+        error: '当前已用资源低于节点可配置配额下限，无法对齐。请手动设置有效配额。',
+        code: 'HOST_USAGE_BELOW_QUOTA_MINIMUM'
+      })
+    }
+
+    const before = {
+      cpuAllowanceMax: host.cpu_allowance_max || 0,
+      memoryMax: host.memory_max || 0
+    }
+    const after = {
+      cpuAllowanceMax: usedResources.cpuUsed,
+      memoryMax: usedResources.memoryUsed
+    }
+
+    await prisma.host.update({
+      where: { id: hostId },
+      data: {
+        cpuAllowanceMax: after.cpuAllowanceMax,
+        memoryMax: after.memoryMax
+      }
+    })
+
+    const diff = {
+      cpuAllowanceMax: after.cpuAllowanceMax - before.cpuAllowanceMax,
+      memoryMax: after.memoryMax - before.memoryMax
+    }
+    const hasChanges = diff.cpuAllowanceMax !== 0 || diff.memoryMax !== 0
+
+    await createLog(
+      request.user.id,
+      'host',
+      'host.align_quotas',
+      `Aligned quotas for host "${host.name}" to usage: CPUMax ${before.cpuAllowanceMax}→${after.cpuAllowanceMax}, MemMax ${before.memoryMax}→${after.memoryMax}`,
+      'success'
+    )
+
+    return {
+      message: hasChanges ? '配额已对齐到当前使用量' : '配额已经与当前使用量一致',
       hasChanges,
       before,
       after,
@@ -5594,7 +5650,19 @@ export default async function hostRoutes(fastify: FastifyInstance) {
         id: targetUser.id,
         username: targetUser.username,
         status: targetUser.status,
-        hasSshKey: sshKeyCount > 0
+        hasSshKey: sshKeyCount > 0,
+        sshKeys: request.user.role === 'admin'
+          ? (await prisma.sshKey.findMany({
+              where: { userId: targetUser.id },
+              select: { id: true, name: true, fingerprint: true, createdAt: true },
+              orderBy: { createdAt: 'desc' }
+            })).map(key => ({
+              id: key.id,
+              name: key.name,
+              fingerprint: key.fingerprint,
+              createdAt: key.createdAt.toISOString()
+            }))
+          : undefined
       }
     }
   })
@@ -5611,6 +5679,8 @@ export default async function hostRoutes(fastify: FastifyInstance) {
       cpu?: number
       memory?: number
       disk?: number
+      sshKeyId?: number
+      rootPassword?: string
     }
   }>('/:id/instances/create-for-user', {
     onRequest: [fastify.authenticate],
@@ -5628,7 +5698,9 @@ export default async function hostRoutes(fastify: FastifyInstance) {
           image: { type: 'string', minLength: 1 },
           cpu: { type: 'integer', minimum: 15, maximum: 10000 },
           memory: { type: 'integer', minimum: 128, maximum: 524288 },
-          disk: { type: 'integer', minimum: 512, maximum: 104857600 }
+          disk: { type: 'integer', minimum: 512, maximum: 104857600 },
+          sshKeyId: { type: 'integer', minimum: 1 },
+          rootPassword: { type: 'string', minLength: 8, maxLength: 128 }
         }
       }
     }
@@ -5644,7 +5716,9 @@ export default async function hostRoutes(fastify: FastifyInstance) {
       image,
       cpu,
       memory,
-      disk
+      disk,
+      sshKeyId,
+      rootPassword: requestedRootPassword
     } = request.body
 
     if (isNaN(hostId)) {
@@ -5689,12 +5763,43 @@ export default async function hostRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: `用户 "${username}" 状态异常，无法创建实例` })
     }
 
-    const targetUserSshKeys = await db.getSSHKeysByUserId(targetUser.id)
-    if (targetUserSshKeys.length === 0) {
+    if (!isAdmin && (sshKeyId !== undefined || requestedRootPassword !== undefined)) {
+      return reply.code(403).send(apiError(ErrorCode.FORBIDDEN))
+    }
+
+    if (isAdmin && ((sshKeyId === undefined) === (requestedRootPassword === undefined))) {
+      return reply.code(400).send({ error: '请选择一把 SSH 密钥或输入自定义实例密码' })
+    }
+
+    if (sshKeyId !== undefined && requestedRootPassword !== undefined) {
+      return reply.code(400).send({ error: 'SSH 密钥和自定义密码只能选择一种登录方式' })
+    }
+
+    const targetUserSshKeys = isAdmin ? [] : await db.getSSHKeysByUserId(targetUser.id)
+    const selectedSshKey = isAdmin && sshKeyId !== undefined
+      ? await prisma.sshKey.findFirst({
+          where: { id: sshKeyId, userId: targetUser.id },
+          select: { publicKey: true }
+        })
+      : null
+
+    if (isAdmin && sshKeyId !== undefined && !selectedSshKey) {
+      return reply.code(400).send({ error: '所选 SSH 密钥不存在或不属于目标用户' })
+    }
+
+    if (requestedRootPassword !== undefined) {
+      const passwordCheck = validatePassword(requestedRootPassword)
+      if (!passwordCheck.valid) {
+        return reply.code(400).send({ error: passwordCheck.message || '自定义密码不符合强度要求' })
+      }
+    }
+
+    if (!isAdmin && targetUserSshKeys.length === 0) {
       return reply.code(400).send({ error: `用户 "${username}" 没有 SSH 密钥，请先让用户添加 SSH 密钥` })
     }
 
-    const sshKey = targetUserSshKeys[0].public_key
+    const sshKey = isAdmin ? selectedSshKey?.publicKey : targetUserSshKeys[0]?.public_key
+    const effectiveRootPassword = requestedRootPassword || generateRandomPassword(16)
     const pkg = await db.getPackageById(packageId)
     if (!pkg || !pkg.active) {
       return reply.code(400).send({ error: '套餐不存在或已禁用' })
@@ -5819,11 +5924,10 @@ export default async function hostRoutes(fastify: FastifyInstance) {
     if (pkgInstanceType === 'vm' && ['nat_ipv6_nat', 'ipv6_nat'].includes(networkMode)) {
       return reply.code(400).send({ error: 'KVM packages do not support IPv4 NAT & IPv6 NAT or IPv6 NAT network modes' })
     }
-    const autoPassword = randomUUID().replace(/-/g, '').slice(0, 16)
     const { configPayload, metaData } = generateIncusConfig({
       instanceName: name,
       imageAlias: image,
-      rootPassword: autoPassword,
+      rootPassword: effectiveRootPassword,
       sshKey,
       networkMode,
       type: pkgInstanceType === 'vm' ? 'virtual-machine' : 'container'
@@ -6196,7 +6300,10 @@ export default async function hostRoutes(fastify: FastifyInstance) {
           charged: false,
           amount: 0,
           expiresAt: paidGiftExpiresAt?.toISOString() ?? null,
-          giftDays: paidGiftDays ?? null
+          giftDays: paidGiftDays ?? null,
+          ...(isAdmin && requestedRootPassword !== undefined
+            ? { sshPort: metaData.sshPort, rootPassword: metaData.rootPassword }
+            : {})
         }
       })
     } catch (error: any) {
@@ -8119,6 +8226,7 @@ export default async function hostRoutes(fastify: FastifyInstance) {
       action: 'rebuild' | 'recreate'
       imageAlias: string
       sshKeyId?: number
+      rootPassword?: string
       customInitCommandIds?: number[]
       confirmationText: string
       riskConfirmed: boolean
@@ -8132,7 +8240,8 @@ export default async function hostRoutes(fastify: FastifyInstance) {
         properties: {
           action: { type: 'string', enum: ['rebuild', 'recreate'] },
           imageAlias: { type: 'string' },
-          sshKeyId: { type: 'integer' },
+          sshKeyId: { type: 'integer', minimum: 1 },
+          rootPassword: { type: 'string', minLength: 8, maxLength: 128 },
           customInitCommandIds: { type: 'array', items: { type: 'integer' }, maxItems: 20 },
           confirmationText: { type: 'string' },
           riskConfirmed: { type: 'boolean' }
@@ -8143,7 +8252,7 @@ export default async function hostRoutes(fastify: FastifyInstance) {
     const { user } = request
     const hostId = Number(request.params.id)
     const instanceId = Number(request.params.instanceId)
-    const { action, imageAlias, sshKeyId, customInitCommandIds, confirmationText, riskConfirmed } = request.body
+    const { action, imageAlias, sshKeyId, rootPassword, customInitCommandIds, confirmationText, riskConfirmed } = request.body
 
     if (isNaN(hostId) || isNaN(instanceId)) {
       return reply.code(400).send(apiError(ErrorCode.INVALID_ID))
@@ -8228,6 +8337,18 @@ export default async function hostRoutes(fastify: FastifyInstance) {
       }
     }
 
+    if (action === 'rebuild' && sshKeyId !== undefined && rootPassword !== undefined) {
+      return reply.code(400).send({ error: '请选择 SSH 密钥或自定义密码，不能同时使用两种方式' })
+    }
+    if (action === 'rebuild' && sshKeyId === undefined && rootPassword === undefined) {
+      return reply.code(400).send({ error: '请选择 SSH 密钥或输入自定义密码' })
+    }
+    if (action === 'rebuild' && rootPassword !== undefined) {
+      const passwordCheck = validatePassword(rootPassword)
+      if (!passwordCheck.valid) {
+        return reply.code(400).send({ error: passwordCheck.message || '自定义密码不符合强度要求' })
+      }
+    }
     if (sshKeyId) {
       const keyRecord = await getSSHKeyById(sshKeyId)
       if (!keyRecord || keyRecord.user_id !== instance.user_id) {
@@ -8249,7 +8370,8 @@ export default async function hostRoutes(fastify: FastifyInstance) {
       taskType: action,
       imageAlias,
       sshKeyId,
-      customInitCommandIds
+      customInitCommandIds,
+      rootPassword: rootPassword ? encryptSensitiveData(rootPassword) : undefined
     })
 
     await createLog(user.id, 'host', `host.ops.${action}`, `Queued ${action} task for instance "${instance.name}" on host "${host.name}" with image ${imageAlias}`, 'success', { instanceId })

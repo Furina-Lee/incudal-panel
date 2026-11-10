@@ -339,6 +339,12 @@ onMounted(async (): Promise<void> => {
   isComponentMounted.value = true
   await configStore.loadPublicConfig()
   await loadInstance()
+  if (instance.value && isComponentMounted.value) {
+    const taskResponse = await api.instances.getActiveTask(instance.value.id)
+    if (taskResponse.task && ['PENDING', 'PROCESSING'].includes(taskResponse.task.status)) {
+      startTaskPolling(taskResponse.task.id)
+    }
+  }
   // 注意：loadInstance() 内部已经处理了 loadStats() 和 loadTrafficData() 的调用
   // 不需要在这里重复调用
   if (isComponentMounted.value) {
@@ -1302,7 +1308,7 @@ type InstanceAction = 'start' | 'stop' | 'restart' | 'delete' | 'clone'
 
 // 开始任务轮询
 // 注：_taskId 参数保留用于未来扩展（如按 taskId 指定轮询）
-function startTaskPolling(_taskId: number): void {
+function startTaskPolling(taskId: number): void {
   // 清除旧的轮询
   if (taskPollingInterval) {
     clearInterval(taskPollingInterval)
@@ -1315,14 +1321,15 @@ function startTaskPolling(_taskId: number): void {
     }
     
     try {
-      const response = await api.instances.getActiveTask(instance.value.id)
+      const response = await api.instances.getTaskById(taskId)
       activeTask.value = response.task
-      
-      // 如果任务已完成或失败，停止轮询并刷新实例
-      if (!response.task || response.task.status === 'COMPLETED' || response.task.status === 'FAILED') {
+
+      if (response.task.status === 'COMPLETED' || response.task.status === 'FAILED') {
         stopTaskPolling()
-        if (response.task?.status === 'FAILED' && response.task.error) {
-          toast.error(`${t('instance.detail.actions.actionFailed')}: ${response.task.error}`)
+        if (response.task.status === 'FAILED') {
+          toast.error(`${t('instance.detail.actions.actionFailed')}: ${response.task.error || t('instance.detail.actions.taskFailed')}`)
+        } else if (response.task.taskType === 'initialize' || response.task.taskType === 'rebuild') {
+          toast.success(t('instance.detail.actions.initializationCompleted'))
         }
         await loadInstance()
       }
@@ -1426,9 +1433,9 @@ async function loadSshKeys(): Promise<void> {
   }
 }
 
-async function doRebuild(data: { image: string; sshKeyId: number; customInitCommandIds?: number[]; initScript?: string }): Promise<void> {
-  if (!data.image || !data.sshKeyId || !instance.value) {
-    toast.error(t('instance.detail.actions.selectImageAndKey'))
+async function doRebuild(data: { image: string; sshKeyId?: number; rootPassword?: string; customInitCommandIds?: number[]; initScript?: string }): Promise<void> {
+  if (!data.image || (!data.sshKeyId && !data.rootPassword) || !instance.value) {
+    toast.error(t('instance.detail.actions.selectCredential'))
     return
   }
   
@@ -1437,6 +1444,7 @@ async function doRebuild(data: { image: string; sshKeyId: number; customInitComm
     const response = await api.instances.rebuild(instance.value.id, {
       image: data.image,
       sshKeyId: data.sshKeyId,
+      rootPassword: data.rootPassword,
       customInitCommandIds: data.customInitCommandIds,
       initScript: data.initScript
     })
@@ -2366,7 +2374,9 @@ function formatShortDate(dateStr: string | null | undefined): string {
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
             </svg>
-            <span class="hidden sm:inline">{{ $t(`instance.detail.task.${activeTask.taskType}`) }}</span>
+            <span>{{ $te(`instance.detail.task.${activeTask.taskType}`) ? $t(`instance.detail.task.${activeTask.taskType}`) : $t('instance.detail.task.operation') }}</span>
+            <span v-if="activeTask.progress" class="text-2xs opacity-80">{{ $te(`instance.detail.taskStage.${activeTask.progress}`) ? $t(`instance.detail.taskStage.${activeTask.progress}`) : activeTask.progress }}</span>
+            <span v-if="activeTask.queuePosition > 0" class="text-2xs opacity-80">#{{ activeTask.queuePosition }}</span>
           </div>
           <!-- Transfer Lock Warning -->
           <div 
