@@ -4,6 +4,7 @@ import type { BadgeApplicationTarget, PointsLogType, UserBadgeSource } from '@pr
 import { BADGE_RANDOM_DRAW_COST, BADGE_SELECT_COST, DEFAULT_BADGE_CATALOG } from '../config/badges.js'
 import type { BadgeCatalogItem } from '../config/badges.js'
 import { prisma } from './prisma.js'
+import { ensureUserPoints } from './points.js'
 
 type BadgeClient = typeof prisma | Prisma.TransactionClient
 
@@ -285,14 +286,6 @@ export async function createBadgeOwnership(
   return mapBadgeOwnership(ownership, badgeMap)
 }
 
-async function ensureUserPoints(userId: number, tx: typeof prisma = prisma) {
-  return tx.userPoints.upsert({
-    where: { userId },
-    update: {},
-    create: { userId }
-  })
-}
-
 async function spendBadgePoints(
   tx: Prisma.TransactionClient,
   userId: number,
@@ -300,11 +293,7 @@ async function spendBadgePoints(
   logType: PointsLogType,
   remark: string
 ) {
-  await tx.userPoints.upsert({
-    where: { userId },
-    update: {},
-    create: { userId }
-  })
+  await ensureUserPoints(userId, tx)
 
   const updateResult = await tx.userPoints.updateMany({
     where: {

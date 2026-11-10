@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../db/prisma.js'
+import { ensureUserPoints } from '../db/points.js'
 import { getSystemConfig, getSystemConfigNumber } from '../db/system-config.js'
 
 export type InviteCostResource = 'balance' | 'points' | (string & {})
@@ -99,11 +100,7 @@ const inviteCostResourceHandlers: Record<string, InviteCostResourceHandler> = {
     async charge(tx, userId, amount, inviteCode) {
       if (amount <= 0) return
 
-      await tx.userPoints.upsert({
-        where: { userId },
-        update: {},
-        create: { userId }
-      })
+      await ensureUserPoints(userId, tx)
 
       const rows = await tx.$queryRaw<Array<{ pointsBefore: number; pointsAfter: number }>>(Prisma.sql`
         UPDATE user_points
@@ -259,11 +256,7 @@ export async function getUserInviteBalances(userId: number): Promise<{
       where: { id: userId },
       select: { balance: true }
     }),
-    prisma.userPoints.upsert({
-      where: { userId },
-      update: {},
-      create: { userId }
-    })
+    ensureUserPoints(userId)
   ])
 
   return {

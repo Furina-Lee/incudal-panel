@@ -7,18 +7,22 @@ import { getUserTotalConsume } from './balance.js'
 
 // ==================== 用户积分 ====================
 
+export async function ensureUserPoints(userId: number, client: Prisma.TransactionClient | typeof prisma = prisma) {
+  await client.userPoints.createMany({
+    data: [{ userId }],
+    skipDuplicates: true
+  })
+
+  const userPoints = await client.userPoints.findUnique({ where: { userId } })
+  if (!userPoints) throw new Error(`积分账户初始化失败: userId=${userId}`)
+  return userPoints
+}
+
 /**
  * 获取用户积分信息
  */
 export async function getUserPoints(userId: number) {
-  // 使用 upsert 避免并发时的唯一约束冲突
-  const userPoints = await prisma.userPoints.upsert({
-    where: { userId },
-    update: {},
-    create: { userId }
-  })
-
-  return userPoints
+  return ensureUserPoints(userId)
 }
 
 /**
@@ -60,12 +64,7 @@ export async function convertPointsFromConsumption(userId: number): Promise<{
   message?: string
 }> {
   return prisma.$transaction(async (tx) => {
-    // 使用 upsert 避免并发时的唯一约束冲突
-    const userPoints = await tx.userPoints.upsert({
-      where: { userId },
-      update: {},
-      create: { userId }
-    })
+    const userPoints = await ensureUserPoints(userId, tx)
 
     // 2. 获取用户当前实际总消费额，兼容历史 consume 日志 amount 正负号不一致
     const totalConsume = await getUserTotalConsume(userId, tx)
@@ -173,12 +172,7 @@ export async function addPoints(
   remark?: string
 ): Promise<{ success: boolean; newPoints: number }> {
   return prisma.$transaction(async (tx) => {
-    // 使用 upsert 避免并发时的唯一约束冲突
-    const userPoints = await tx.userPoints.upsert({
-      where: { userId },
-      update: {},
-      create: { userId }
-    })
+    const userPoints = await ensureUserPoints(userId, tx)
 
     const updatedPoints = await tx.userPoints.update({
       where: { userId },
@@ -213,12 +207,7 @@ export async function adminAdjustPoints(
   remark: string
 ): Promise<{ success: boolean; newPoints: number; message?: string }> {
   return prisma.$transaction(async (tx) => {
-    // 使用 upsert 避免并发时的唯一约束冲突
-    const userPoints = await tx.userPoints.upsert({
-      where: { userId },
-      update: {},
-      create: { userId }
-    })
+    const userPoints = await ensureUserPoints(userId, tx)
 
     // 检查扣除后是否会变成负数
     if (amount < 0 && userPoints.points + amount < 0) {

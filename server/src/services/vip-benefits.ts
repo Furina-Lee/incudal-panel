@@ -1,5 +1,6 @@
 import { Prisma, type VipBenefitClaim, type VipBenefitClaimStatus, type VipBenefitReward } from '@prisma/client'
 import { prisma } from '../db/prisma.js'
+import { ensureUserPoints } from '../db/points.js'
 import {
   MAX_VIP_LEVEL,
   calculateUserVipLevelByMetric,
@@ -668,11 +669,7 @@ export async function claimVipBenefitReward(userId: number, rewardId: number): P
         })
       } else if (type === 'points') {
         const amount = normalizePositiveInteger(config.amount, 'Points reward amount', MAX_POINTS_AMOUNT)
-        const userPoints = await tx.userPoints.upsert({
-          where: { userId },
-          update: {},
-          create: { userId }
-        })
+        const userPoints = await ensureUserPoints(userId, tx)
         const updatedPoints = await tx.userPoints.update({
           where: { userId },
           data: {

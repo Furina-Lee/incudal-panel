@@ -4,6 +4,7 @@
  */
 
 import { prisma } from './prisma.js'
+import { ensureUserPoints } from './points.js'
 import type { Prisma } from '@prisma/client'
 import type { User, UserQuota } from '../types/database.js'
 
@@ -318,11 +319,7 @@ async function applyFreeSiteRegisterGiftInTransaction(
   }
 
   if (pointsAmount > 0) {
-    const userPoints = await tx.userPoints.upsert({
-      where: { userId },
-      update: {},
-      create: { userId }
-    })
+    const userPoints = await ensureUserPoints(userId, tx)
 
     const updatedPoints = await tx.userPoints.update({
       where: { userId },

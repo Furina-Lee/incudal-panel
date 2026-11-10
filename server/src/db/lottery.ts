@@ -5,6 +5,7 @@ import { prisma } from './prisma.js'
 import { Prisma } from '@prisma/client'
 import type { LotteryPrizeType, LotteryRecordStatus } from '@prisma/client'
 import { createBadgeOwnership, selectRandomBadgeOrThrow } from './badges.js'
+import { ensureUserPoints } from './points.js'
 import type { BadgeOwnershipView } from './badges.js'
 
 // ==================== 抽奖活动 ====================
@@ -522,12 +523,8 @@ export async function performDraw(userId: number, lotteryId: number): Promise<{
       return { success: false, message: '奖池为空' }
     }
 
-    // 2. 检查用户积分（使用 upsert 避免并发时的唯一约束冲突）
-    const userPoints = await tx.userPoints.upsert({
-      where: { userId },
-      update: {},
-      create: { userId }
-    })
+    // 2. 检查用户积分
+    const userPoints = await ensureUserPoints(userId, tx)
 
     if (userPoints.points < lottery.costPoints) {
       return { success: false, message: '积分不足' }
